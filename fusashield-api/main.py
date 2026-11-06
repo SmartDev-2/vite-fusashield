@@ -14,6 +14,7 @@ API ini TIDAK memuat model.  Tugasnya:
 """
 
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import date
 from urllib.parse import quote
@@ -27,6 +28,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import credentials, db
 
+_base_dir = Path(__file__).resolve().parent
+load_dotenv(_base_dir / ".env")
+load_dotenv(_base_dir.parent / ".env")
 load_dotenv()
 
 E = os.getenv
@@ -101,6 +105,46 @@ app.add_middleware(
 def require_firebase():
     if not FIREBASE_OK:
         raise HTTPException(503, "Firebase belum terhubung — periksa serviceAccountKey.json")
+
+
+def fb_get(path: str):
+    """Ambil data dari Firebase Realtime Database (Admin SDK dengan fallback REST API)."""
+    if FIREBASE_OK:
+        try:
+            return db.reference(path).get()
+        except Exception as e:
+            print(f"[!] Gagal baca Firebase Admin: {e}")
+    db_url = E("FIREBASE_DATABASE_URL")
+    if db_url:
+        try:
+            clean_url = db_url.rstrip("/")
+            r = requests.get(f"{clean_url}/{path.lstrip('/')}.json", timeout=10)
+            if r.ok:
+                return r.json()
+        except Exception as e:
+            print(f"[!] Gagal baca Firebase REST API: {e}")
+    return None
+
+
+def fb_post(path: str, data: dict):
+    """Kirim data ke Firebase Realtime Database (Admin SDK dengan fallback REST API)."""
+    if FIREBASE_OK:
+        try:
+            ref = db.reference(path)
+            new_ref = ref.push(data)
+            return new_ref.key
+        except Exception as e:
+            print(f"[!] Gagal tulis Firebase Admin: {e}")
+    db_url = E("FIREBASE_DATABASE_URL")
+    if db_url:
+        try:
+            clean_url = db_url.rstrip("/")
+            r = requests.post(f"{clean_url}/{path.lstrip('/')}.json", json=data, timeout=10)
+            if r.ok:
+                return r.json().get("name")
+        except Exception as e:
+            print(f"[!] Gagal tulis Firebase REST API: {e}")
+    return None
 
 
 def auth(x_api_key: str | None = Header(None)):

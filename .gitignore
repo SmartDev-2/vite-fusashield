@@ -1,3 +1,18 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+dist/
+
+# Python Virtual Environment & Cache
+venv/
+fusashield-api/venv/
+__pycache__/
+fusashield-api/__pycache__/
+*.pyc
+
+# Environment & Secret Credentials
 .env
+fusashield-api/.env
+*.env
+serviceAccountKey.json
+fusashield-api/serviceAccountKey.json
+
