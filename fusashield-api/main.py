@@ -14,6 +14,7 @@ API ini TIDAK memuat model.  Tugasnya:
 """
 
 import os
+import socket
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import date
@@ -70,6 +71,19 @@ def hst() -> int:
     return (date.today() - date.fromisoformat(E("PLANT_DATE", date.today().isoformat()))).days
 
 
+# ---------------- Helper Jaringan ----------------
+def get_local_ip() -> str:
+    """Mendapatkan alamat IP lokal komputer di jaringan Wi-Fi/LAN."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 # ---------------- App ----------------
 FIREBASE_OK = False
 
@@ -87,6 +101,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[!] Firebase GAGAL init: {exc}")
         print("[!] API tetap jalan — endpoint yang butuh Firebase akan return 503")
+
+    ip = get_local_ip()
+    port = int(E("PORT", "8000"))
+    print("\n" + "=" * 58)
+    print(" 🚀 FusaShield API Siap Digunakan!")
+    print(f" 📱 URL Aplikasi Mobile : http://{ip}:{port}")
+    print(f" 📖 Swagger Docs        : http://{ip}:{port}/docs")
+    print(f" 💻 Akses Lokal PC      : http://localhost:{port}")
+    print("=" * 58 + "\n")
     yield
 
 
