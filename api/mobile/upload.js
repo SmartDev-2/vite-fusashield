@@ -15,13 +15,13 @@ function sniff(b) {
 /** Body = bytes gambar mentah. Disimpan ke Supabase; CNN diproses terpisah oleh layanan Keras. */
 export async function POST(request) {
   return handle(async () => {
-    limit(`upload:${user}`, 6, 60_000);
+    limit('upload:mobile', 20, 60_000);
     const buf = Buffer.from(await request.arrayBuffer());
     if (buf.length === 0) throw new HttpError(400, 'Tidak ada data foto');
     if (buf.length > MAX) throw new HttpError(413, 'Foto terlalu besar (maksimal 4 MB)');
     const ext = sniff(buf);
     if (!ext) throw new HttpError(400, 'File bukan gambar JPEG, PNG, atau WEBP');
-    const path = `${DEVICE()}/${Date.now()}-mobile_${crypto.randomBytes(3).toString('hex')}.${ext}`; // nama dibuat server
+    const path = `${DEVICE()}/${Date.now()}-mobile_${crypto.randomBytes(3).toString('hex')}.${ext}`;
     await sbUpload(path, buf, MIME[ext]);
     return json({ path, photo_url: await photoUrl(path) });
   });
