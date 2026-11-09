@@ -1,0 +1,115 @@
+// Fungsi bersama untuk endpoint mobile di Vercel (tanpa dependensi npm).
+import crypto from 'node:crypto';
+
+// Nilai yang sama dengan milik website boleh memakai nama VITE_ (tidak perlu diisi dua kali di Vercel).
+// Kunci rahasia (SUPABASE_KEY, MOBILE_SECRET, dst.) sengaja TIDAK punya cadangan VITE_.
+const SHARED = ['FIREBASE_DATABASE_URL', 'DEVICE', 'SUPABASE_URL', 'SUPABASE_BUCKET'];
+const env = (k, d = '') => process.env[k] ?? (SHARED.includes(k) ? process.env['VITE_' + k] : undefined) ?? d;
+export const DEVICE = () => env('DEVICE', 'cabai_01');
+
+export class HttpError extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+export const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+
+export async function handle(fn) {
+  try { return await fn(); }
+  catch (e) {
+    if (e instanceof HttpError) return json({ detail: e.message }, e.status);
+    console.error(e);
+    return json({ detail: 'Kesalahan server' }, 500);
+  }
+}
+
+// ---------- Token bertanda tangan (HMAC-SHA256) ----------
+const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
+const same = (a, b) => crypto.timingSafeEqual(sha(a), sha(b));
+
+function mac(body) {
+  const secret = env('MOBILE_SECRET');
+  if (!secret) throw new HttpError(500, 'MOBILE_SECRET belum diisi di Vercel');
+  return crypto.createHmac('sha256', secret).update(body).digest('base64url');
+}
+
+export function makeToken(user) {
+  const hours = parseFloat(env('TOKEN_HOURS', '12'));
+  const body = Buffer.from(JSON.stringify({ sub: user, exp: Date.now() + hours * 3600_000 })).toString('base64url');
+  return { token: `${body}.${mac(body)}`, expires_in: Math.round(hours * 3600) };
+}
+
+export function authUser(request) {
+  const h = request.headers.get('authorization') || '';
+  if (!h.startsWith('Bearer ')) throw new HttpError(401, 'Butuh login');
+  const [body, sig] = h.slice(7).split('.');
+  if (!body || !sig || !same(sig, mac(body))) throw new HttpError(401, 'Token tidak valid');
+  let p;
+  try { p = JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { throw new HttpError(401, 'Token tidak valid'); }
+  if (!(p.exp > Date.now())) throw new HttpError(401, 'Sesi habis, silakan login ulang');
+  return p.sub;
+}
+
+export function checkLogin(username, password) {
+  let ok = false;
+  for (const pair of env('MOBILE_USERS').split(',')) {
+    const i = pair.indexOf(':');
+    if (i < 1) continue;
+    const u = pair.slice(0, i), p = pair.slice(i + 1);
+    if (same(u, username) && same(p, password)) ok = true;
+  }
+  return ok;
+}
+
+// ---------- Pembatas laju (per instance; hanya pengaman tambahan) ----------
+const hits = new Map();
+export function limit(key, n, windowMs) {
+  const now = Date.now();
+  const q = (hits.get(key) || []).filter((t) => now - t < windowMs);
+  if (q.length >= n) throw new HttpError(429, 'Terlalu banyak permintaan, coba lagi sebentar');
+  q.push(now); hits.set(key, q);
+}
+export const clientIp = (request) =>
+  (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'ip?';
+
+// ---------- Firebase (REST; baca butuh Rules .read atau FIREBASE_AUTH) ----------
+export async function fbGet(path, params = {}) {
+  const q = new URLSearchParams(params);
+  if (env('FIREBASE_AUTH')) q.set('auth', env('FIREBASE_AUTH'));
+  const url = `${env('FIREBASE_DATABASE_URL').replace(/\/$/, '')}/${path}.json?${q}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new HttpError(502, `Firebase menolak permintaan (${r.status}). Cek Rules dan FIREBASE_DATABASE_URL`);
+  return r.json();
+}
+
+// ---------- Supabase ----------
+const sbBase = () => env('SUPABASE_URL').replace(/\/$/, '');
+export const sbHeaders = () => (env('SUPABASE_KEY') ? { apikey: env('SUPABASE_KEY'), Authorization: `Bearer ${env('SUPABASE_KEY')}` } : {});
+export const BUCKET = () => env('SUPABASE_BUCKET');
+const signed = new Map();
+
+export async function photoUrl(path) {
+  if (!path) return null;
+  const enc = encodeURI(path);
+  if (env('SUPABASE_PUBLIC', 'true') === 'true') return `${sbBase()}/storage/v1/object/public/${BUCKET()}/${enc}`;
+  const hit = signed.get(path);
+  if (hit && hit.exp > Date.now()) return hit.url;
+  const r = await fetch(`${sbBase()}/storage/v1/object/sign/${BUCKET()}/${enc}`, {
+    method: 'POST', headers: { ...sbHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 3600 }),
+  });
+  if (!r.ok) return null;
+  const url = `${sbBase()}/storage/v1${(await r.json()).signedURL}`;
+  signed.set(path, { url, exp: Date.now() + 3_000_000 });
+  return url;
+}
+
+export async function sbUpload(path, buf, mime) {
+  const r = await fetch(`${sbBase()}/storage/v1/object/${BUCKET()}/${path}`, {
+    method: 'POST', headers: { ...sbHeaders(), 'Content-Type': mime, 'x-upsert': 'false' }, body: buf,
+  });
+  if (!r.ok) throw new HttpError(502, `Penyimpanan menolak unggahan (${r.status})`);
+}
+
+export const DECISION_KEYS = ['tingkat_dosis', 'status_mitigasi', 'dosis_rekomendasi_ml', 'dosis_ml', 'cnn_label', 'cnn_confidence',
+  'cnn_symptom_score', 'fase_hst', 'sisa_cooldown_detik', 'last_updated', 'alasan_blokir', 'foto_basi', 'foto_umur_jam',
+  'foto_sumber', 'pump_command'];
+export const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k] ?? null]));
