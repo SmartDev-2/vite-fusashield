@@ -6,7 +6,7 @@ const LEVELS = ['aman', 'preventif', 'waspada', 'kritis'];
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const hideBroken = (e) => { e.currentTarget.style.visibility = 'hidden'; };
 
-/* ---------- Grafik tren dengan tooltip dan filter seri ---------- */
+ /Grafik tren dengan tooltip dan filter seri/
 const W = 720, H = 250, L = 38, R = 14, T = 12, B = 28;
 
 function Chart({ labels, series }) {
@@ -103,7 +103,7 @@ export function Ringkasan({ mon, hist }) {
   const img = photoUrl(f.foto_sumber);
   const warns = [];
   if (mon && !soilOk) warns.push(`Sensor kelembapan tanah belum terbaca (nilai mentah ${dash(mon.soil_raw)}). Biasanya probe di udara atau kabel lepas.`);
-  if (f.foto_basi) warns.push('Foto daun sudah lama. Ambil foto baru supaya analisis CNN akurat.');
+  if (f.foto_basi) warns.push('Foto daun sudah lama. Ambil foto baru agar analisis akurat.');
   if (f.alasan_blokir) warns.push('Pompa tertahan: ' + f.alasan_blokir + '.');
   const soilVal = soilOk ? mon.soil_moisture : f.input_kelembapan;
   const cooldown = f.sisa_cooldown_detik > 0;
