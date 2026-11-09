@@ -15,7 +15,6 @@ function sniff(b) {
 /** Body = bytes gambar mentah. Disimpan ke Supabase; CNN diproses terpisah oleh layanan Keras. */
 export async function POST(request) {
   return handle(async () => {
-    const user = authUser(request);
     limit(`upload:${user}`, 6, 60_000);
     const buf = Buffer.from(await request.arrayBuffer());
     if (buf.length === 0) throw new HttpError(400, 'Tidak ada data foto');

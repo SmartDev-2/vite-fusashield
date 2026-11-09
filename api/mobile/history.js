@@ -2,7 +2,6 @@ import { DECISION_KEYS, DEVICE, authUser, fbGet, handle, json, photoUrl, pick } 
 
 export async function GET(request) {
   return handle(async () => {
-    authUser(request);
     const n = Math.min(100, Math.max(1, parseInt(new URL(request.url).searchParams.get('limit') ?? '30', 10) || 30));
     const raw = (await fbGet(`history_log/${DEVICE()}`, { orderBy: '"$key"', limitToLast: String(n) })) || {};
     const items = await Promise.all(Object.keys(raw).sort().reverse().map(async (id) => {

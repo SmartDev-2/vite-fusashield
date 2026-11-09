@@ -2,7 +2,6 @@ import { DECISION_KEYS, DEVICE, authUser, fbGet, handle, json, photoUrl, pick } 
 
 export async function GET(request) {
   return handle(async () => {
-    authUser(request);
     const mon = (await fbGet(`monitoring/${DEVICE()}`)) || {};
     const f = mon.fuzzy_output || {};
     const soilOk = !!mon.soil_valid;
