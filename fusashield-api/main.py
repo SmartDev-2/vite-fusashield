@@ -14,6 +14,8 @@ API ini TIDAK memuat model.  Tugasnya:
 """
 
 import os
+import socket
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import date
 from urllib.parse import quote
@@ -27,6 +29,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import credentials, db
 
+_base_dir = Path(__file__).resolve().parent
+load_dotenv(_base_dir / ".env")
+load_dotenv(_base_dir.parent / ".env")
 load_dotenv()
 
 E = os.getenv
@@ -66,6 +71,19 @@ def hst() -> int:
     return (date.today() - date.fromisoformat(E("PLANT_DATE", date.today().isoformat()))).days
 
 
+# ---------------- Helper Jaringan ----------------
+def get_local_ip() -> str:
+    """Mendapatkan alamat IP lokal komputer di jaringan Wi-Fi/LAN."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 # ---------------- App ----------------
 FIREBASE_OK = False
 
@@ -83,6 +101,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[!] Firebase GAGAL init: {exc}")
         print("[!] API tetap jalan — endpoint yang butuh Firebase akan return 503")
+
+    ip = get_local_ip()
+    port = int(E("PORT", "8000"))
+    print("\n" + "=" * 58)
+    print(" 🚀 FusaShield API Siap Digunakan!")
+    print(f" 📱 URL Aplikasi Mobile : http://{ip}:{port}")
+    print(f" 📖 Swagger Docs        : http://{ip}:{port}/docs")
+    print(f" 💻 Akses Lokal PC      : http://localhost:{port}")
+    print("=" * 58 + "\n")
     yield
 
 
@@ -101,6 +128,46 @@ app.add_middleware(
 def require_firebase():
     if not FIREBASE_OK:
         raise HTTPException(503, "Firebase belum terhubung — periksa serviceAccountKey.json")
+
+
+def fb_get(path: str):
+    """Ambil data dari Firebase Realtime Database (Admin SDK dengan fallback REST API)."""
+    if FIREBASE_OK:
+        try:
+            return db.reference(path).get()
+        except Exception as e:
+            print(f"[!] Gagal baca Firebase Admin: {e}")
+    db_url = E("FIREBASE_DATABASE_URL")
+    if db_url:
+        try:
+            clean_url = db_url.rstrip("/")
+            r = requests.get(f"{clean_url}/{path.lstrip('/')}.json", timeout=10)
+            if r.ok:
+                return r.json()
+        except Exception as e:
+            print(f"[!] Gagal baca Firebase REST API: {e}")
+    return None
+
+
+def fb_post(path: str, data: dict):
+    """Kirim data ke Firebase Realtime Database (Admin SDK dengan fallback REST API)."""
+    if FIREBASE_OK:
+        try:
+            ref = db.reference(path)
+            new_ref = ref.push(data)
+            return new_ref.key
+        except Exception as e:
+            print(f"[!] Gagal tulis Firebase Admin: {e}")
+    db_url = E("FIREBASE_DATABASE_URL")
+    if db_url:
+        try:
+            clean_url = db_url.rstrip("/")
+            r = requests.post(f"{clean_url}/{path.lstrip('/')}.json", json=data, timeout=10)
+            if r.ok:
+                return r.json().get("name")
+        except Exception as e:
+            print(f"[!] Gagal tulis Firebase REST API: {e}")
+    return None
 
 
 def auth(x_api_key: str | None = Header(None)):
