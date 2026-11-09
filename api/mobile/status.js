@@ -17,3 +17,6 @@ export async function GET(request) {
     });
   });
 }
+
+import { preflight as _preflight } from '../../server/lib.js';
+export const OPTIONS = _preflight;

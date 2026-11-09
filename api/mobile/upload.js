@@ -27,3 +27,6 @@ export async function POST(request) {
     return json({ path, photo_url: await photoUrl(path) });
   });
 }
+
+import { preflight as _preflight } from '../../server/lib.js';
+export const OPTIONS = _preflight;

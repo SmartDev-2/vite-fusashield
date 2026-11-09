@@ -15,3 +15,6 @@ export async function GET(request) {
     return json({ items });
   });
 }
+
+import { preflight as _preflight } from '../../server/lib.js';
+export const OPTIONS = _preflight;

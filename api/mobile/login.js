@@ -9,3 +9,6 @@ export async function POST(request) {
     return json(makeToken(String(b.username)));
   });
 }
+
+import { preflight as _preflight } from '../../server/lib.js';
+export const OPTIONS = _preflight;

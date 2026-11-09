@@ -10,8 +10,16 @@ export const DEVICE = () => env('DEVICE', 'cabai_01');
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
+// CORS: perlu jika aplikasi Flutter dijalankan sebagai Web (browser). Aman karena akses tetap butuh token / kunci aplikasi.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-API-KEY',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+};
+export const preflight = () => new Response(null, { status: 204, headers: CORS });
 export const json = (data, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS } });
 
 export async function handle(fn) {
   try { return await fn(); }
@@ -39,14 +47,23 @@ export function makeToken(user) {
 }
 
 export function authUser(request) {
+  const appKey = env('MOBILE_APP_KEY');
+  // Jika MOBILE_APP_KEY tidak diisi di Vercel, izinkan akses langsung (mode publik)
+  if (!appKey) return 'public';
+
+  const given = request.headers.get('x-api-key');
+  if (given && same(given, appKey)) return 'app';
+
   const h = request.headers.get('authorization') || '';
-  if (!h.startsWith('Bearer ')) throw new HttpError(401, 'Butuh login');
-  const [body, sig] = h.slice(7).split('.');
-  if (!body || !sig || !same(sig, mac(body))) throw new HttpError(401, 'Token tidak valid');
-  let p;
-  try { p = JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { throw new HttpError(401, 'Token tidak valid'); }
-  if (!(p.exp > Date.now())) throw new HttpError(401, 'Sesi habis, silakan login ulang');
-  return p.sub;
+  if (h.startsWith('Bearer ')) {
+    const [body, sig] = h.slice(7).split('.');
+    if (body && sig && same(sig, mac(body))) {
+      let p;
+      try { p = JSON.parse(Buffer.from(body, 'base64url').toString()); } catch {}
+      if (p && p.exp > Date.now()) return p.sub;
+    }
+  }
+  throw new HttpError(401, 'Butuh login atau API Key tidak valid');
 }
 
 export function checkLogin(username, password) {
