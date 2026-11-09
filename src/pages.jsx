@@ -99,13 +99,6 @@ export function Ringkasan({ mon, hist }) {
   const S = f.sumber_sensor || {};
   const lv = level(f);
   const soilOk = !!mon?.soil_valid;
-<<<<<<< HEAD
-  const warns = [];
-  if (mon && !soilOk) warns.push(`Sensor kelembapan tanah belum terbaca (nilai mentah ${dash(mon.soil_raw)}, biasanya probe di udara atau kabel lepas).`);
-  if (f.foto_basi) warns.push('Foto daun sudah expired, ambil foto baru.');
-  if (f.alasan_blokir) warns.push('Pompa tertahan: ' + f.alasan_blokir + '.');
-=======
->>>>>>> cb5d20de184f28e7e04e66ffdffc45182208558e
   const pumpOn = mon?.pump_status === 'ON';
   const img = photoUrl(f.foto_sumber);
   const warns = [];

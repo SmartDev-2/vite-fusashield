@@ -16,3 +16,4 @@ fusashield-api/.env
 serviceAccountKey.json
 fusashield-api/serviceAccountKey.json
 
+start.bat
