@@ -134,12 +134,14 @@ export function Ringkasan({ mon, hist }) {
       )}
 
       <div className="grid4">
-        <Metric icon="thermo" tone="t-orange" label="Suhu udara" value={dash(mon?.temperature)} unit="°C"
-          note={S.temperature ? `Sumber: ${S.temperature}` : 'Dari sensor DHT'} />
-        <Metric icon="wind" tone="t-blue" label="Kelembapan udara" value={dash(mon?.humidity)} unit="%" bar={mon?.humidity}
-          note={S.humidity ? `Sumber: ${S.humidity}` : 'Dari sensor DHT'} />
-        <Metric icon="drop" tone="t-green" label="Kelembapan tanah" value={dash(soilVal)} unit="%" bar={soilVal}
-          note={soilOk ? 'Sensor terbaca normal' : 'Memakai nilai demo, sensor belum terbaca'} />
+       <Metric icon="thermo" tone="t-orange" label="Suhu udara" value={dash(mon?.temperature)} unit="°C"
+  note="Pemantauan suhu lingkungan" />
+
+<Metric icon="wind" tone="t-blue" label="Kelembapan udara" value={dash(mon?.humidity)} unit="%" bar={mon?.humidity}
+  note="Pemantauan kelembapan udara" />
+
+<Metric icon="drop" tone="t-green" label="Kelembapan tanah" value={dash(soilVal)} unit="%" bar={soilVal}
+  note={soilOk ? 'Kondisi tanah terpantau' : 'Periksa probe dan koneksi kabel sensor'} />
         <Metric icon="bolt" tone={pumpOn ? 't-green' : 't-gray'} label="Pompa Trichoderma" value={pumpOn ? 'Menyala' : 'Mati'}
           note={cooldown ? `Siap lagi sekitar ${Math.ceil(f.sisa_cooldown_detik / 3600)} jam` : `Siap dipakai, agitator ${f.agitator_detik || 15} detik`} />
       </div>
