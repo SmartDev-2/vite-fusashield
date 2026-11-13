@@ -18,7 +18,7 @@
  *   }
  */
 
-import { DEVICE, callGemini, fbGet, handle, json, limit, preflight } from '../server/lib.js';
+import { DEVICE, callGroq, fbGet, handle, json, limit, preflight } from '../server/lib.js';
 
 export const OPTIONS = preflight;
 
@@ -121,15 +121,15 @@ export async function POST(request) {
       .slice(-20)
       .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 2000) }));
 
-    // Rakit pesan
+    // Rakit pesan ke Groq
     const messages = [
       { role: 'system', content: buildSystemPrompt(mon) },
       ...history,
       { role: 'user', content: userMessage.slice(0, 1000) },
     ];
 
-    // Panggil Gemini API (menggunakan konfigurasi dari .env)
-    const reply = await callGemini(messages, { maxTokens: 768, temperature: 0.65 });
+    // Panggil Groq (menggunakan API key dari .env)
+    const reply = await callGroq(messages, { maxTokens: 768, temperature: 0.65 });
 
     // Snapshot konteks yang dipakai (untuk debug/transparansi)
     const f = mon?.fuzzy_output || {};

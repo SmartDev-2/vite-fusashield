@@ -5,7 +5,11 @@ import path from 'node:path';
 
 // Nilai yang sama dengan milik website boleh memakai nama VITE_ (tidak perlu diisi dua kali di Vercel).
 // Kunci rahasia (SUPABASE_KEY, MOBILE_SECRET, dst.) sengaja TIDAK punya cadangan VITE_.
-const SHARED = ['FIREBASE_DATABASE_URL', 'DEVICE', 'SUPABASE_URL', 'SUPABASE_BUCKET', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MODEL_FALLBACK'];
+const SHARED = [
+  'FIREBASE_DATABASE_URL', 'DEVICE', 'SUPABASE_URL', 'SUPABASE_BUCKET',
+  'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODEL_FALLBACK',
+  'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MODEL_FALLBACK'
+];
 
 function readDotEnv() {
   try {
@@ -242,7 +246,7 @@ export async function callGemini(messages, { model, maxTokens = 1024, temperatur
 // ---------- Groq LLM ----------
 export async function callGroq(messages, { model, maxTokens = 1024, temperature = 0.7 } = {}) {
   const groqKey = env('GROQ_API_KEY');
-  if (!groqKey) throw new HttpError(503, 'GROQ_API_KEY belum diisi di Vercel env vars');
+  if (!groqKey) throw new HttpError(503, 'GROQ_API_KEY belum diisi di .env atau environment variables');
   const usedModel = model || env('GROQ_MODEL', 'llama-3.3-70b-versatile');
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
