@@ -1,10 +1,43 @@
 // Fungsi bersama untuk endpoint mobile di Vercel (tanpa dependensi npm).
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // Nilai yang sama dengan milik website boleh memakai nama VITE_ (tidak perlu diisi dua kali di Vercel).
 // Kunci rahasia (SUPABASE_KEY, MOBILE_SECRET, dst.) sengaja TIDAK punya cadangan VITE_.
-const SHARED = ['FIREBASE_DATABASE_URL', 'DEVICE', 'SUPABASE_URL', 'SUPABASE_BUCKET'];
-const env = (k, d = '') => process.env[k] ?? (SHARED.includes(k) ? process.env['VITE_' + k] : undefined) ?? d;
+const SHARED = ['FIREBASE_DATABASE_URL', 'DEVICE', 'SUPABASE_URL', 'SUPABASE_BUCKET', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MODEL_FALLBACK'];
+
+function readDotEnv() {
+  try {
+    const p = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(p)) {
+      const content = fs.readFileSync(p, 'utf8');
+      const res = {};
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq > 0) {
+          const k = trimmed.slice(0, eq).trim();
+          let v = trimmed.slice(eq + 1).trim();
+          if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+            v = v.slice(1, -1);
+          }
+          res[k] = v;
+        }
+      }
+      return res;
+    }
+  } catch {}
+  return {};
+}
+const localEnv = readDotEnv();
+
+const env = (k, d = '') =>
+  process.env[k] ??
+  localEnv[k] ??
+  (SHARED.includes(k) ? (process.env['VITE_' + k] ?? localEnv['VITE_' + k]) : undefined) ??
+  d;
 export const DEVICE = () => env('DEVICE', 'cabai_01');
 
 export class HttpError extends Error {
@@ -130,3 +163,103 @@ export const DECISION_KEYS = ['tingkat_dosis', 'status_mitigasi', 'dosis_rekomen
   'cnn_symptom_score', 'fase_hst', 'sisa_cooldown_detik', 'last_updated', 'alasan_blokir', 'foto_basi', 'foto_umur_jam',
   'foto_sumber', 'pump_command'];
 export const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k] ?? null]));
+
+// ---------- Gemini LLM ----------
+export async function callGemini(messages, { model, maxTokens = 1024, temperature = 0.7 } = {}) {
+  const geminiKey = env('GEMINI_API_KEY');
+  if (!geminiKey) throw new HttpError(503, 'GEMINI_API_KEY belum diisi di .env atau environment variables');
+  const usedModel = model || env('GEMINI_MODEL', 'gemini-2.5-flash');
+
+  // Pisahkan system instruction dan konten percakapan user/model
+  const systemParts = [];
+  const contents = [];
+
+  for (const m of messages) {
+    const role = m.role;
+    const text = String(m.content || '').trim();
+    if (!text) continue;
+
+    if (role === 'system') {
+      systemParts.push({ text });
+    } else {
+      const gRole = (role === 'assistant' || role === 'model') ? 'model' : 'user';
+      if (contents.length > 0 && contents[contents.length - 1].role === gRole) {
+        contents[contents.length - 1].parts[0].text += '\n\n' + text;
+      } else {
+        contents.push({ role: gRole, parts: [{ text }] });
+      }
+    }
+  }
+
+  // Gemini mengharuskan percakapan pertama berasal dari user
+  while (contents.length > 0 && contents[0].role === 'model') {
+    contents.shift();
+  }
+  if (contents.length === 0) {
+    contents.push({ role: 'user', parts: [{ text: 'Halo' }] });
+  }
+
+  const payload = {
+    contents,
+    generationConfig: {
+      maxOutputTokens: maxTokens,
+      temperature,
+    },
+  };
+
+  if (systemParts.length > 0) {
+    payload.systemInstruction = { parts: systemParts };
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(usedModel)}:generateContent?key=${encodeURIComponent(geminiKey)}`;
+
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text().catch(() => '');
+    // Fallback ke model cadangan jika model utama gagal/overloaded/tidak tersedia
+    const fallbackModel = env('GEMINI_MODEL_FALLBACK', 'gemini-1.5-flash');
+    if (fallbackModel && fallbackModel !== usedModel) {
+      console.warn(`[Gemini] Gagal memanggil ${usedModel} (${r.status}), mencoba fallback ke ${fallbackModel}...`);
+      return callGemini(messages, { model: fallbackModel, maxTokens, temperature });
+    }
+    throw new HttpError(502, `Gemini API error (${r.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const data = await r.json();
+  const candidate = data.candidates?.[0];
+  const reply = candidate?.content?.parts?.[0]?.text;
+  if (!reply && candidate?.finishReason === 'SAFETY') {
+    return 'Maaf, respons tidak dapat ditampilkan karena filter keamanan.';
+  }
+  return reply ?? '';
+}
+
+// ---------- Groq LLM ----------
+export async function callGroq(messages, { model, maxTokens = 1024, temperature = 0.7 } = {}) {
+  const groqKey = env('GROQ_API_KEY');
+  if (!groqKey) throw new HttpError(503, 'GROQ_API_KEY belum diisi di Vercel env vars');
+  const usedModel = model || env('GROQ_MODEL', 'llama-3.3-70b-versatile');
+  const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: usedModel, messages, max_tokens: maxTokens, temperature }),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => '');
+    // Fallback ke model ringan jika model utama overloaded/quota
+    if (r.status === 429 || r.status === 503) {
+      const fallbackModel = env('GROQ_MODEL_FALLBACK', 'llama-3.1-8b-instant');
+      if (fallbackModel !== usedModel) {
+        return callGroq(messages, { model: fallbackModel, maxTokens, temperature });
+      }
+    }
+    throw new HttpError(502, `Groq error (${r.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await r.json();
+  return data.choices?.[0]?.message?.content ?? '';
+}
