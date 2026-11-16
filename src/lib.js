@@ -10,9 +10,13 @@ export const photoUrl = (p) =>
   p ? `${CFG.sbUrl}/storage/v1/object/public/${CFG.bucket}/${encodeURI(p)}` : null;
 
 export const level = (o = {}) => {
+  if (!o || Object.keys(o).length === 0) return null;
   if (o.tingkat_dosis) return o.tingkat_dosis.toLowerCase();
-  const d = o.dosis_rekomendasi_ml ?? o.dosis_ml ?? 0;
-  return d >= 80 ? 'kritis' : d >= 35 ? 'waspada' : d >= 10 ? 'preventif' : 'aman';
+  if (o.dosis_rekomendasi_ml != null || o.dosis_ml != null) {
+    const d = o.dosis_rekomendasi_ml ?? o.dosis_ml;
+    return d >= 80 ? 'kritis' : d >= 35 ? 'waspada' : d >= 10 ? 'preventif' : 'aman';
+  }
+  return null;
 };
 
 export const COLOR = { aman: 'var(--aman)', preventif: 'var(--prev)', waspada: 'var(--wasp)', kritis: 'var(--krit)' };

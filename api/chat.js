@@ -27,22 +27,42 @@ const RATE_KEY = 'chat:mobile';
 
 // ----- Helper: rakit system prompt dari data Firebase -----
 function buildSystemPrompt(mon) {
-  const f   = mon?.fuzzy_output || {};
+  const f = mon?.fuzzy_output || {};
+  const hasSensors = Boolean(mon && (mon.temperature != null || mon.humidity != null || mon.soil_moisture != null || mon.soil_raw != null));
+  const hasFuzzy = Boolean(mon?.fuzzy_output && Object.keys(mon.fuzzy_output).length > 0);
+  const hasIot = Boolean(hasSensors || hasFuzzy || mon?.pump_status != null);
+
+  if (!hasIot) {
+    return `Anda adalah FusaBot — asisten agronomi presisi FusaShield untuk budidaya cabai organik dengan Trichoderma harzianum sebagai agen hayati melawan Fusarium oxysporum.
+
+STATUS SISTEM REALTIME:
+⚠️ PERINGATAN KRUSIAL: TIDAK ADA DATA SENSOR IOT DARI ESP32 MAUPUN KEPUTUSAN FUZZY DI FIREBASE SAAT INI.
+- Data suhu, kelembapan udara, kelembapan tanah, dan pompa ESP32: BELUM TERSEDIA (belum ada data masuk).
+- Data klasifikasi daun CNN dan dosis rekomendasi: BELUM TERSEDIA.
+
+ATURAN WAJIB (JANGAN PERNAH DILANGGAR):
+1. JANGAN PERNAH MENAMPILKAN, MENGARANG, ATAU MENGGUNAKAN DATA DUMMY / SIMULASI / ANGKA FIKTIF (misal suhu 31°C, kelembapan 70%, dosis 25ml, dsb).
+2. Jika pengguna menanyakan kondisi sensor saat ini, status tanaman, dosis penyiraman, atau pompa, TEGASKAN SECARA JUJUR bahwa saat ini BELUM ADA data sensor yang masuk dari perangkat IoT (ESP32) di Firebase.
+3. Sarankan pengguna untuk memeriksa apakah perangkat ESP32 sudah menyala dan terhubung ke Firebase.
+4. Anda tetap dapat menjawab pertanyaan umum edukatif seputar budidaya cabai, pencegahan jamur Fusarium oxysporum, dan peran Trichoderma harzianum, tanpa mengaitkannya dengan data sensor fiktif.
+5. Jawab dalam Bahasa Indonesia yang ramah, ringkas (maks 3 paragraf), dan mudah dipahami.`;
+  }
+
   const sen = {
-    suhu       : mon?.temperature   ?? '–',
-    kelembapan : mon?.humidity      ?? '–',
-    tanah      : mon?.soil_moisture ?? (f.input_kelembapan ?? '–'),
-    pompa      : mon?.pump_status   ?? '–',
+    suhu       : mon?.temperature   ?? 'Belum ada data',
+    kelembapan : mon?.humidity      ?? 'Belum ada data',
+    tanah      : (mon?.soil_valid ? mon?.soil_moisture : (mon?.soil_moisture ?? f.input_kelembapan)) ?? 'Belum ada data',
+    pompa      : mon?.pump_status   ?? 'Belum ada data',
     hst        : f.hst              ?? '–',
   };
   const dec = {
-    cnn_label       : f.cnn_label               ?? '–',
-    cnn_conf        : f.cnn_confidence           ?? '–',
-    gejala          : f.cnn_symptom_score        ?? '–',
+    cnn_label       : f.cnn_label               ?? 'Belum dianalisis',
+    cnn_conf        : f.cnn_confidence           ?? null,
+    gejala          : f.cnn_symptom_score        ?? null,
     fase            : f.fase_hst                 ?? '–',
-    dosis           : f.dosis_rekomendasi_ml     ?? '–',
-    tingkat         : f.tingkat_dosis            ?? '–',
-    mitigasi        : f.status_mitigasi          ?? '–',
+    dosis           : f.dosis_rekomendasi_ml     ?? null,
+    tingkat         : f.tingkat_dosis            ?? 'Belum dianalisis',
+    mitigasi        : f.status_mitigasi          ?? 'Belum dianalisis',
     cooldown        : f.sisa_cooldown_detik      ?? 0,
     llm_advisory    : f.llm_advisory             ?? null,
     alasan_blokir   : f.alasan_blokir            ?? null,
@@ -56,41 +76,41 @@ function buildSystemPrompt(mon) {
 
   const cooldownInfo = Number(dec.cooldown) > 0
     ? `Pompa masih cooldown ${dec.cooldown} detik`
-    : 'Pompa siap diaktifkan';
+    : (mon?.pump_status ? 'Pompa siap diaktifkan' : 'Status pompa belum diketahui');
 
   const advisoryBlock = dec.llm_advisory
-    ? `\n📋 ADVISORY TERAKHIR DARI SISTEM:\n"${dec.llm_advisory.slice(0, 300)}"\n`
+    ? `\n ADVISORY TERAKHIR DARI SISTEM:\n"${dec.llm_advisory.slice(0, 300)}"\n`
     : '';
 
   const blokirBlock = dec.alasan_blokir
-    ? `\n🚫 ALASAN BLOKIR TERAKHIR: ${dec.alasan_blokir}\n`
+    ? `\n ALASAN BLOKIR TERAKHIR: ${dec.alasan_blokir}\n`
     : '';
 
   return `Anda adalah FusaBot — asisten agronomi presisi FusaShield untuk budidaya cabai organik dengan Trichoderma harzianum sebagai agen hayati melawan Fusarium oxysporum.
 
 📡 DATA SENSOR LAPANGAN SAAT INI (REALTIME dari ESP32):
-  Suhu Udara        : ${sen.suhu}°C
-  Kelembapan Udara  : ${sen.kelembapan}%RH  ${kelWarning}
-  Kelembapan Tanah  : ${sen.tanah}%
+  Suhu Udara        : ${sen.suhu}${sen.suhu !== 'Belum ada data' ? '°C' : ''}
+  Kelembapan Udara  : ${sen.kelembapan}${sen.kelembapan !== 'Belum ada data' ? '%RH' : ''}  ${kelWarning}
+  Kelembapan Tanah  : ${sen.tanah}${sen.tanah !== 'Belum ada data' ? '%' : ''}
   Status Pompa      : ${sen.pompa}
   HST Tanaman       : ${sen.hst} hari
 ${advisoryBlock}${blokirBlock}
 🧠 HASIL ANALISIS AI TERBARU:
-  CNN Klasifikasi   : ${dec.cnn_label} (akurasi ${dec.cnn_conf}%)
-  Skor Gejala       : ${dec.gejala}%
+  CNN Klasifikasi   : ${dec.cnn_label}${dec.cnn_conf != null ? ` (akurasi ${dec.cnn_conf}%)` : ''}
+  Skor Gejala       : ${dec.gejala != null ? `${dec.gejala}%` : 'Belum dihitung'}
   Fase Pertumbuhan  : ${dec.fase}
-  Fuzzy Decision    : ${dec.tingkat} → Dosis Rekomendasi ${dec.dosis} ml
+  Fuzzy Decision    : ${dec.tingkat}${dec.dosis != null ? ` → Dosis Rekomendasi ${dec.dosis} ml` : ''}
   Status Mitigasi   : ${dec.mitigasi}
   Cooldown Pompa    : ${cooldownInfo}
 
 PANDUAN PERAN ANDA:
-1. Jawab pertanyaan petani berdasarkan DATA SENSOR dan ANALISIS AI di atas.
+1. Jawab pertanyaan petani berdasarkan DATA SENSOR dan ANALISIS AI di atas. Jika data bertuliskan 'Belum ada data' atau 'Belum dianalisis', sampaikan apa adanya dan JANGAN mengarang angka.
 2. Jika ditanya "kenapa" sebuah keputusan diambil — jelaskan logika CNN (deteksi visual) dan Fuzzy Logic (keputusan dosis) secara sederhana dan mudah dipahami petani awam.
 3. Gunakan analogi sehari-hari saat menjelaskan AI (mis. "seperti dokter yang melihat foto, lalu membuat resep").
 4. Jangan merekomendasikan fungisida kimia tanpa memperingatkan dampaknya terhadap Trichoderma.
 5. Jika sensor menunjukkan kondisi berisiko, proaktif ingatkan petani tanpa menakut-nakuti.
 6. Jawab dalam Bahasa Indonesia yang ramah, singkat (maks 3 paragraf), dan mudah dipahami.
-7. JANGAN mengarang data sensor — hanya gunakan angka yang tercantum di atas.`;
+7. JANGAN mengarang data sensor atau menampilkan data dummy — hanya gunakan fakta yang tercantum di atas.`;
 }
 
 // ----- Endpoint utama -----

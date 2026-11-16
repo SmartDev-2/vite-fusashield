@@ -56,7 +56,7 @@ export default function App() {
             <span className="dev-ico"><Icon n="leaf" size={18} /></span>
             <div>
               <div className="dev-name">{CFG.device}</div>
-              <div className="dev-sub">{mon?.fuzzy_output?.fase_hst || 'Tanaman cabai'}</div>
+              <div className="dev-sub">{mon?.fuzzy_output?.fase_hst || (mon ? 'Menunggu analisis fase' : 'Menunggu data IoT')}</div>
             </div>
           </div>
         </div>

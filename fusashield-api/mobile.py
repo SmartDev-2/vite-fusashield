@@ -134,14 +134,15 @@ def status(user: str = Depends(current_user)):
     """Status realtime: sensor + keputusan fuzzy terbaru dari Firebase."""
     mon = core.fb_get(f"monitoring/{core.DEVICE}") or {}
     f = mon.get("fuzzy_output") or {}
-    soil_ok = bool(mon.get("soil_valid"))
+    has_soil_valid = "soil_valid" in mon
+    soil_ok = bool(mon.get("soil_valid")) if has_soil_valid else None
     return {
         "device": core.DEVICE,
         "sensors": {
             "temperature": mon.get("temperature"),
             "humidity": mon.get("humidity"),
             "soil_valid": soil_ok,
-            "soil_moisture": mon.get("soil_moisture") if soil_ok else f.get("input_kelembapan"),
+            "soil_moisture": mon.get("soil_moisture") if soil_ok else (f.get("input_kelembapan") or mon.get("soil_moisture")),
             "pump_status": mon.get("pump_status"),
         },
         "decision": {k: f.get(k) for k in DECISION_KEYS},

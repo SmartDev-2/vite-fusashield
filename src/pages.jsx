@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MSG, dash, level, photoUrl } from './lib';
+import { CFG, MSG, dash, level, photoUrl } from './lib';
 import { Icon } from './icons.jsx';
 
 const LEVELS = ['aman', 'preventif', 'waspada', 'kritis'];
@@ -84,11 +84,12 @@ function Chart({ labels, series }) {
 
 /* ---------- Ringkasan ---------- */
 function Metric({ icon, tone, label, value, unit, note, bar }) {
+  const hasVal = value != null && value !== '–';
   return (
     <div className="card metric">
       <div className="m-head"><span className={'m-ico ' + tone}><Icon n={icon} size={20} /></span><span className="m-label">{label}</span></div>
-      <div className="m-val">{value}{unit && <small>{unit}</small>}</div>
-      {bar != null && <div className="bar"><i className={tone} style={{ width: Math.max(0, Math.min(100, bar)) + '%' }} /></div>}
+      <div className="m-val">{value}{hasVal && unit && <small>{unit}</small>}</div>
+      {bar != null && hasVal && <div className="bar"><i className={tone} style={{ width: Math.max(0, Math.min(100, bar)) + '%' }} /></div>}
       <div className="m-note">{note}</div>
     </div>
   );
@@ -101,29 +102,74 @@ export function Ringkasan({ mon, hist }) {
   const soilOk = !!mon?.soil_valid;
   const pumpOn = mon?.pump_status === 'ON';
   const img = photoUrl(f.foto_sumber);
+
+  const hasSensors = Boolean(mon && (mon.temperature != null || mon.humidity != null || mon.soil_moisture != null || mon.soil_raw != null));
+  const hasFuzzy = Boolean(mon?.fuzzy_output && Object.keys(mon.fuzzy_output).length > 0);
+  const hasIot = Boolean(hasSensors || hasFuzzy || mon?.pump_status != null);
+
+  if (!hasIot) {
+    return (
+      <div className="stack">
+        <div className="card">
+          <div className="empty" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
+            <Icon n="chip" size={48} />
+            <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>Tidak Ada Data IoT di Firebase</h3>
+            <p style={{ maxWidth: '520px', margin: '0.4rem auto 0', color: 'var(--mute)', lineHeight: '1.5' }}>
+              Belum ada data sensor yang masuk dari perangkat IoT (ESP32) pada path <code>monitoring/{CFG.device}</code>.
+              Sistem tidak menampilkan data dummy / tiruan. Data metrik sensor, status mitigasi, dan pompa akan tampil otomatis begitu perangkat mengirim pembacaan sensor pertama.
+            </p>
+          </div>
+        </div>
+
+        {hist && hist.length > 0 && (
+          <div className="card">
+            <div className="card-h"><h3>Tren riwayat sebelumnya</h3><span className="muted">{hist.length} catatan tersimpan di history_log</span></div>
+            <Chart labels={hist.map((h) => (h.last_updated || '').slice(5, 16))} series={[
+              { name: 'Suhu (°C)', color: '#e8731a', data: hist.map((h) => h.input_suhu ?? null) },
+              { name: 'Kelembapan udara (%)', color: '#2f8fd0', data: hist.map((h) => h.input_kelembapan_udara ?? null) },
+              { name: 'Gejala CNN (%)', color: '#d9363e', dash: '6 5', data: hist.map((h) => h.cnn_symptom_score ?? null) },
+            ]} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const warns = [];
-  if (mon && !soilOk) warns.push(`Sensor kelembapan tanah belum terbaca (nilai mentah ${dash(mon.soil_raw)}). Biasanya probe di udara atau kabel lepas.`);
+  if (mon && !soilOk && mon.soil_raw != null) warns.push(`Sensor kelembapan tanah belum terbaca (nilai mentah ${dash(mon.soil_raw)}). Biasanya probe di udara atau kabel lepas.`);
   if (f.foto_basi) warns.push('Foto daun sudah lama. Ambil foto baru agar analisis akurat.');
   if (f.alasan_blokir) warns.push('Pompa tertahan: ' + f.alasan_blokir + '.');
-  const soilVal = soilOk ? mon.soil_moisture : f.input_kelembapan;
+  const soilVal = soilOk ? mon.soil_moisture : f.input_kelembapan ?? mon.soil_moisture;
   const cooldown = f.sisa_cooldown_detik > 0;
+
+  const pumpVal = mon.pump_status ? (pumpOn ? 'Menyala' : 'Mati') : '–';
+  const pumpTone = mon.pump_status ? (pumpOn ? 't-green' : 't-gray') : 't-gray';
+  const pumpNote = mon.pump_status
+    ? (cooldown ? `Siap lagi sekitar ${Math.ceil(f.sisa_cooldown_detik / 3600)} jam` : f.agitator_detik ? `Siap dipakai, agitator ${f.agitator_detik} detik` : 'Status pompa normal')
+    : 'Menunggu status pompa dari ESP32';
 
   return (
     <div className="stack">
-      <section className={`hero lv-${mon ? lv : 'none'}` + (mon && lv === 'kritis' ? ' pulse' : '')}>
+      <section className={`hero lv-${lv || 'none'}` + (lv === 'kritis' ? ' pulse' : '')}>
         <div className="hero-main">
-          <span className="hero-ico"><Icon n={!mon || lv === 'aman' ? 'check' : 'alert'} size={28} sw={2} /></span>
+          <span className="hero-ico"><Icon n={lv ? (lv === 'aman' ? 'check' : 'alert') : 'chip'} size={28} sw={2} /></span>
           <div>
-            <div className="hero-kicker">Status mitigasi{mon && <span className={`pill lv-${lv}`}>{cap(lv)}</span>}</div>
-            <h2>{mon ? (f.status_mitigasi || cap(lv)) : 'Menunggu data Firebase'}</h2>
-            <p>{mon ? MSG[lv] : 'Data akan tampil otomatis begitu perangkat mengirim pembacaan pertama.'}</p>
+            <div className="hero-kicker">Status mitigasi{lv ? <span className={`pill lv-${lv}`}>{cap(lv)}</span> : <span className="pill lv-none">Menunggu Analisis</span>}</div>
+            <h2>{lv ? (f.status_mitigasi || cap(lv)) : 'Sensor Terhubung, Menunggu Analisis'}</h2>
+            <p>{lv ? (MSG[lv] || 'Kondisi tanaman terpantau.') : 'Data sensor terbaca dari ESP32. Menunggu model AI & logika fuzzy memproses status tanaman.'}</p>
           </div>
         </div>
         <div className="hero-side">
-          <div className="dose"><b>{mon ? f.dosis_rekomendasi_ml ?? 0 : '–'}</b><span>ml</span><small>Dosis rekomendasi Trichoderma</small></div>
+          <div className="dose">
+            {lv ? (
+              <><b>{f.dosis_rekomendasi_ml ?? f.dosis_ml ?? 0}</b><span>ml</span><small>Dosis rekomendasi Trichoderma</small></>
+            ) : (
+              <><b>–</b><small>Belum ada rekomendasi dosis</small></>
+            )}
+          </div>
           <ol className="scale" aria-label="Tingkat dosis">
             {LEVELS.map((l) => (
-              <li key={l} className={`lv-${l}` + (mon && l === lv ? ' on' : '')}><i /><span>{cap(l)}</span></li>
+              <li key={l} className={`lv-${l}` + (l === lv ? ' on' : '')}><i /><span>{cap(l)}</span></li>
             ))}
           </ol>
         </div>
@@ -134,16 +180,16 @@ export function Ringkasan({ mon, hist }) {
       )}
 
       <div className="grid4">
-       <Metric icon="thermo" tone="t-orange" label="Suhu udara" value={dash(mon?.temperature)} unit="°C"
-  note="Pemantauan suhu lingkungan" />
+        <Metric icon="thermo" tone="t-orange" label="Suhu udara" value={mon.temperature != null ? mon.temperature : '–'} unit="°C"
+          note={mon.temperature != null ? 'Pemantauan suhu lingkungan' : 'Belum ada pembacaan suhu'} />
 
-<Metric icon="wind" tone="t-blue" label="Kelembapan udara" value={dash(mon?.humidity)} unit="%" bar={mon?.humidity}
-  note="Pemantauan kelembapan udara" />
+        <Metric icon="wind" tone="t-blue" label="Kelembapan udara" value={mon.humidity != null ? mon.humidity : '–'} unit="%" bar={mon.humidity}
+          note={mon.humidity != null ? 'Pemantauan kelembapan udara' : 'Belum ada pembacaan kelembapan'} />
 
-<Metric icon="drop" tone="t-green" label="Kelembapan tanah" value={dash(soilVal)} unit="%" bar={soilVal}
-  note={soilOk ? 'Kondisi tanah terpantau' : 'Periksa probe dan koneksi kabel sensor'} />
-        <Metric icon="bolt" tone={pumpOn ? 't-green' : 't-gray'} label="Pompa Trichoderma" value={pumpOn ? 'Menyala' : 'Mati'}
-          note={cooldown ? `Siap lagi sekitar ${Math.ceil(f.sisa_cooldown_detik / 3600)} jam` : `Siap dipakai, agitator ${f.agitator_detik || 15} detik`} />
+        <Metric icon="drop" tone="t-green" label="Kelembapan tanah" value={soilVal != null ? soilVal : '–'} unit="%" bar={soilVal}
+          note={soilOk ? 'Kondisi tanah terpantau' : mon.soil_raw != null ? 'Periksa probe dan koneksi kabel sensor' : 'Belum ada pembacaan tanah'} />
+
+        <Metric icon="bolt" tone={pumpTone} label="Pompa Trichoderma" value={pumpVal} note={pumpNote} />
       </div>
 
       <div className="grid3">
@@ -161,11 +207,13 @@ export function Ringkasan({ mon, hist }) {
           <div className="frame">
             {img ? <img src={img} alt="Foto daun terakhir" onError={hideBroken} /> : <div className="empty small"><Icon n="camera" size={26} /><span>Belum ada foto</span></div>}
           </div>
-          <div className="photo-meta">
-            <div><b>{dash(f.cnn_label)}</b>{f.cnn_confidence != null && <span className="muted"> keyakinan {f.cnn_confidence}%</span>}</div>
-            <div className="muted">Skor gejala {dash(f.cnn_symptom_score)}%</div>
-            {f.foto_umur_jam != null && <div className="muted">Diambil {f.foto_umur_jam} jam lalu</div>}
-          </div>
+          {img && (
+            <div className="photo-meta">
+              <div><b>{dash(f.cnn_label)}</b>{f.cnn_confidence != null && <span className="muted"> keyakinan {f.cnn_confidence}%</span>}</div>
+              <div className="muted">Skor gejala {dash(f.cnn_symptom_score)}%</div>
+              {f.foto_umur_jam != null && <div className="muted">Diambil {f.foto_umur_jam} jam lalu</div>}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -249,14 +297,33 @@ function KV({ title, icon, rows }) {
 }
 
 export function Perangkat({ mon }) {
+  const hasSensors = Boolean(mon && (mon.temperature != null || mon.humidity != null || mon.soil_moisture != null || mon.soil_raw != null));
+  const hasFuzzy = Boolean(mon?.fuzzy_output && Object.keys(mon.fuzzy_output).length > 0);
+  const hasMon = Boolean(hasSensors || hasFuzzy || mon?.pump_status != null);
+
+  if (!hasMon) {
+    return (
+      <div className="card">
+        <div className="empty" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
+          <Icon n="chip" size={48} />
+          <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>Belum Ada Data Perangkat IoT</h3>
+          <p style={{ maxWidth: '520px', margin: '0.4rem auto 0', color: 'var(--mute)', lineHeight: '1.5' }}>
+            Belum ada komunikasi dari perangkat IoT (ESP32) yang tercatat di Firebase pada node <code>monitoring/{CFG.device}</code>.
+            Data konfigurasi perangkat dan sensor akan tampil setelah ESP32 mengirim sinyal pertama.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const f = mon?.fuzzy_output || {}, S = f.sumber_sensor || {}, A = mon?.ack || {}, C = mon?.command || {};
   return (
     <div className="grid2">
       <KV title="Sensor dan keputusan" icon="chip" rows={[
         ['Mode keputusan', f.mode_keputusan],
         ['Status IoT', f.status_iot],
-        ['Sumber suhu, RH, tanah', [S.temperature, S.humidity, S.soil_moisture].map(dash).join(' / ')],
-        ['Sensor tanah valid', mon ? (mon.soil_valid ? 'Ya' : 'Tidak') : null],
+        ['Sumber suhu, RH, tanah', [S.temperature, S.humidity, S.soil_moisture].filter(Boolean).map(dash).join(' / ') || null],
+        ['Sensor tanah valid', mon?.soil_valid != null ? (mon.soil_valid ? 'Ya' : 'Tidak') : null],
         ['Nilai mentah tanah', mon?.soil_raw],
         ['Uptime perangkat', mon?.uptime_ms ? Math.round(mon.uptime_ms / 60000) + ' menit' : null],
         ['Update fuzzy terakhir', f.last_updated],
