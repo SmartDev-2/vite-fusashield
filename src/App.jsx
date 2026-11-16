@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useDb, useConnected } from './firebase';
-import { CFG } from './lib';
+import { CFG, isLiveIotData } from './lib';
 import { Icon, Logo } from './icons.jsx';
 import { Ringkasan, Riwayat, Foto, Perangkat } from './pages.jsx';
 
@@ -22,6 +22,7 @@ export default function App() {
   const [raw, histErr] = useDb(`history_log/${CFG.device}`, 50);
   const hist = Object.entries(raw || {}).map(([k, v]) => ({ k, ...v }));
   const err = monErr || histErr;
+  const live = isLiveIotData(mon);
 
   useEffect(() => {
     const onHash = () => { setHash(location.hash.slice(1) || 'ringkasan'); setOpen(false); window.scrollTo(0, 0); };
@@ -56,7 +57,7 @@ export default function App() {
             <span className="dev-ico"><Icon n="leaf" size={18} /></span>
             <div>
               <div className="dev-name">{CFG.device}</div>
-              <div className="dev-sub">{mon?.fuzzy_output?.fase_hst || (mon ? 'Menunggu analisis fase' : 'Menunggu data IoT')}</div>
+              <div className="dev-sub">{live ? (mon?.fuzzy_output?.fase_hst || 'IoT Aktif') : 'IoT Tidak Aktif'}</div>
             </div>
           </div>
         </div>
@@ -71,6 +72,7 @@ export default function App() {
           </div>
           <div className="top-right">
             <span className={'conn ' + (online ? 'ok' : 'off')}><i />{online ? 'Firebase terhubung' : 'Firebase terputus'}</span>
+            <span className={'conn ' + (live ? 'ok' : 'off')}><i />{live ? 'IoT Aktif' : 'IoT Tidak Aktif'}</span>
             <div className="clock">
               <b>{now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</b>
               <small>{tanggal(now)}</small>

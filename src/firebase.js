@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, query, limitToLast } from 'firebase/database';
+import { getDatabase, ref, onValue, query, limitToLast, remove } from 'firebase/database';
 
 const E = import.meta.env;
 const app = initializeApp({
@@ -28,4 +28,15 @@ export function useConnected() {
   const [on, setOn] = useState(false);
   useEffect(() => onValue(ref(db, '.info/connected'), (s) => setOn(!!s.val())), []);
   return on;
+}
+
+/** Hapus node monitoring/{device} di Firebase (misal untuk membersihkan data demo lama) */
+export async function clearMonitoring(device) {
+  try {
+    await remove(ref(db, `monitoring/${device}`));
+    return { ok: true };
+  } catch (e) {
+    console.error('Gagal hapus monitoring Firebase:', e);
+    return { ok: false, error: e.message };
+  }
 }

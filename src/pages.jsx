@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { CFG, MSG, dash, level, photoUrl } from './lib';
+import { CFG, MSG, dash, isLiveIotData, level, photoUrl } from './lib';
+import { clearMonitoring } from './firebase';
 import { Icon } from './icons.jsx';
 
 const LEVELS = ['aman', 'preventif', 'waspada', 'kritis'];
@@ -103,21 +104,62 @@ export function Ringkasan({ mon, hist }) {
   const pumpOn = mon?.pump_status === 'ON';
   const img = photoUrl(f.foto_sumber);
 
-  const hasSensors = Boolean(mon && (mon.temperature != null || mon.humidity != null || mon.soil_moisture != null || mon.soil_raw != null));
-  const hasFuzzy = Boolean(mon?.fuzzy_output && Object.keys(mon.fuzzy_output).length > 0);
-  const hasIot = Boolean(hasSensors || hasFuzzy || mon?.pump_status != null);
+  const live = isLiveIotData(mon);
 
-  if (!hasIot) {
+  if (!live) {
+    const isDemo = Boolean(
+      S.temperature === 'DEMO' ||
+      S.humidity === 'DEMO' ||
+      S.soil_moisture === 'DEMO' ||
+      (typeof f.mode_keputusan === 'string' && f.mode_keputusan.toUpperCase().includes('DEMO'))
+    );
+
     return (
       <div className="stack">
         <div className="card">
-          <div className="empty" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
+          <div className="empty" style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
             <Icon n="chip" size={48} />
-            <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>Tidak Ada Data IoT di Firebase</h3>
-            <p style={{ maxWidth: '520px', margin: '0.4rem auto 0', color: 'var(--mute)', lineHeight: '1.5' }}>
-              Belum ada data sensor yang masuk dari perangkat IoT (ESP32) pada path <code>monitoring/{CFG.device}</code>.
-              Sistem tidak menampilkan data dummy / tiruan. Data metrik sensor, status mitigasi, dan pompa akan tampil otomatis begitu perangkat mengirim pembacaan sensor pertama.
+            <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>
+              {isDemo ? 'Data Demo Dinonaktifkan' : 'Perangkat IoT Sedang Tidak Aktif'}
+            </h3>
+            <p style={{ maxWidth: '520px', margin: '0.5rem auto 1.2rem', color: 'var(--mute)', lineHeight: '1.5' }}>
+              {isDemo
+                ? 'Data lama di Firebase terdeteksi sebagai data DEMO/simulasi dan disembunyikan. Nyalakan perangkat IoT ESP32 untuk menampilkan data pembacaan sensor riil.'
+                : 'Perangkat ESP32 sedang mati atau tidak mengirim data baru ke Firebase. Dashboard hanya menampilkan data ketika perangkat IoT dalam keadaan aktif.'}
             </p>
+            <button
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.65rem 1.25rem',
+                borderRadius: '10px',
+                border: '1px solid var(--line)',
+                background: '#fff',
+                cursor: 'pointer',
+                fontWeight: '600',
+                fontSize: '0.88rem',
+                color: 'var(--ink)',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+                transition: 'all 0.2s ease'
+              }}
+              onClick={async (e) => {
+                const btn = e.currentTarget;
+                btn.disabled = true;
+                btn.textContent = 'Membersihkan data Firebase...';
+                const res = await clearMonitoring(CFG.device);
+                if (res.ok) {
+                  btn.textContent = '✓ Data Sisa di Firebase Berhasil Dibersihkan';
+                  btn.style.borderColor = 'var(--aman)';
+                  btn.style.color = 'var(--aman)';
+                } else {
+                  btn.textContent = 'Info: ' + (res.error || 'Akses hapus dibatasi');
+                  btn.disabled = false;
+                }
+              }}
+            >
+              <Icon n="trash" size={16} /> Bersihkan Sisa Data Demo di Firebase
+            </button>
           </div>
         </div>
 
@@ -297,19 +339,17 @@ function KV({ title, icon, rows }) {
 }
 
 export function Perangkat({ mon }) {
-  const hasSensors = Boolean(mon && (mon.temperature != null || mon.humidity != null || mon.soil_moisture != null || mon.soil_raw != null));
-  const hasFuzzy = Boolean(mon?.fuzzy_output && Object.keys(mon.fuzzy_output).length > 0);
-  const hasMon = Boolean(hasSensors || hasFuzzy || mon?.pump_status != null);
+  const live = isLiveIotData(mon);
 
-  if (!hasMon) {
+  if (!live) {
     return (
       <div className="card">
         <div className="empty" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
           <Icon n="chip" size={48} />
-          <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>Belum Ada Data Perangkat IoT</h3>
+          <h3 style={{ fontSize: '1.25rem', marginTop: '1rem', color: 'var(--ink)' }}>Perangkat IoT Sedang Tidak Aktif</h3>
           <p style={{ maxWidth: '520px', margin: '0.4rem auto 0', color: 'var(--mute)', lineHeight: '1.5' }}>
-            Belum ada komunikasi dari perangkat IoT (ESP32) yang tercatat di Firebase pada node <code>monitoring/{CFG.device}</code>.
-            Data konfigurasi perangkat dan sensor akan tampil setelah ESP32 mengirim sinyal pertama.
+            ESP32 belum mengirimkan telemetri aktif pada node <code>monitoring/{CFG.device}</code>.
+            Data konfigurasi perangkat dan sensor akan tampil otomatis setelah ESP32 hidup dan aktif mengirim data sensor.
           </p>
         </div>
       </div>
