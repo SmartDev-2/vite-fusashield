@@ -303,7 +303,7 @@ export function Riwayat({ hist }) {
 
 /* ---------- Unggah foto ---------- */
 const MAX_PILIH = 15 * 1024 * 1024; // batas file asli, sebelum dikecilkan
-const UPLOAD_URL = '/api/upload';
+const API = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 // Kecilkan ke maksimal 1024 px dan jadikan JPEG (sama seperti yang dilakukan API mobile)
 async function keJpeg(file, sisi = 1024) {
@@ -348,7 +348,7 @@ export function Foto({ hist, pending, pendErr }) {
     setMsg(null);
     try {
       const blob = await keJpeg(file);
-      const r = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+      const r = await fetch(`${API}/api/upload`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.detail || `Unggahan gagal (${r.status})`);
       setFile(null);
@@ -370,9 +370,9 @@ export function Foto({ hist, pending, pendErr }) {
       <div className="card">
         <div className="card-h"><h3><Icon n="image" size={18} /> Unggah foto daun</h3><span className="muted">JPG, PNG, atau WEBP</span></div>
 
-        {preview ? (
+        {file ? (
           <>
-            <div className="up-prev"><img src={preview} alt="Pratinjau foto daun" /></div>
+            <div className="up-prev">{preview && <img src={preview} alt="Pratinjau foto daun" />}</div>
             <div className="up-name">{file.name}</div>
           </>
         ) : (
