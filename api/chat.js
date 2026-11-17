@@ -1,6 +1,7 @@
 /**
  * POST /api/chat
  * FusaBot – Live Telemetry-Aware Chatbot + XAI Interactive
+ * LLM: Cloudflare Workers AI (REST API)
  *
  * Body JSON:
  *   {
@@ -16,14 +17,88 @@
  *     "reply": "...",
  *     "context_snapshot": { sensors, decision }   // snapshot data yang dipakai
  *   }
+ *
+ * Environment variable (Vercel -> Settings -> Environment Variables):
+ *   CF_ACCOUNT_ID, CF_API_TOKEN            (wajib)
+ *   CF_MODEL, CF_MODEL_FALLBACK            (opsional)
  */
 
-import { DEVICE, callGroq, fbGet, handle, json, limit, preflight } from '../server/lib.js';
+import { DEVICE, fbGet, handle, json, limit, preflight } from '../server/lib.js';
 
 export const OPTIONS = preflight;
 
 // Batas: 20 pesan per 60 detik (per instance Vercel)
 const RATE_KEY = 'chat:mobile';
+
+// ----- Helper: panggil Cloudflare Workers AI (model utama -> cadangan) -----
+const CF_BASE = 'https://api.cloudflare.com/client/v4';
+
+// Diagnosa saat auth gagal: cek token ke endpoint verify (tanpa membocorkan isi token)
+async function diagnosaToken(accountId, token) {
+  const info = `panjang_token=${token.length}, awalan=${token.slice(0, 5)}, panjang_account_id=${accountId.length}`;
+  try {
+    const url = token.startsWith('cfat_')
+      ? `${CF_BASE}/accounts/${accountId}/tokens/verify`
+      : `${CF_BASE}/user/tokens/verify`;
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    const d = await r.json().catch(() => ({}));
+    return `${info}, verify_http=${r.status}, status=${d?.result?.status ?? '-'}, error=${d?.errors?.[0]?.message ?? '-'}`;
+  } catch (e) {
+    return `${info}, verify_gagal=${e?.message}`;
+  }
+}
+
+async function callCloudflare(messages, { maxTokens = 768, temperature = 0.65 } = {}) {
+  // Buang spasi/baris baru/tanda kutip yang sering ikut tersalin ke env
+  const bersih = (v) => (v ?? '').trim().replace(/^["']|["']$/g, '');
+  const accountId = bersih(process.env.CF_ACCOUNT_ID);
+  const token = bersih(process.env.CF_API_TOKEN);
+  if (!accountId || !token) {
+    throw { status: 500, message: 'CF_ACCOUNT_ID / CF_API_TOKEN belum diset di server' };
+  }
+
+  const models = [
+    process.env.CF_MODEL || '@cf/meta/llama-3.1-8b-instruct',
+    process.env.CF_MODEL_FALLBACK || '@cf/meta/llama-3.2-3b-instruct',
+  ];
+
+  let lastErr = 'Model tidak merespons';
+  let diagDone = false;
+  for (const model of models) {
+    try {
+      const r = await fetch(`${CF_BASE}/accounts/${accountId}/ai/run/${model}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messages, max_tokens: maxTokens, temperature }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data.success === false) {
+        lastErr = data?.errors?.[0]?.message || `HTTP ${r.status}`;
+        console.warn(`[chat] ${model} gagal: ${lastErr} (HTTP ${r.status})`);
+        if ((r.status === 401 || r.status === 403) && !diagDone) {
+          diagDone = true;
+          console.warn('[chat] diagnosa token:', await diagnosaToken(accountId, token));
+        }
+        continue;
+      }
+      const result = data.result || {};
+      const text = result.response ?? result.choices?.[0]?.message?.content ?? '';
+      if (typeof text === 'string' && text.trim()) return text.trim();
+      lastErr = 'Respons kosong';
+    } catch (e) {
+      lastErr = e?.name === 'TimeoutError' ? 'Timeout' : (e?.message || 'Gagal');
+      console.warn(`[chat] ${model} error: ${lastErr}`);
+    }
+  }
+  throw { status: 502, message: `FusaBot gagal merespons (${lastErr})` };
+}
 
 // ----- Helper: rakit system prompt dari data Firebase -----
 function buildSystemPrompt(mon) {
@@ -53,7 +128,7 @@ ATURAN WAJIB (JANGAN PERNAH DILANGGAR):
     kelembapan : mon?.humidity      ?? 'Belum ada data',
     tanah      : (mon?.soil_valid ? mon?.soil_moisture : (mon?.soil_moisture ?? f.input_kelembapan)) ?? 'Belum ada data',
     pompa      : mon?.pump_status   ?? 'Belum ada data',
-    hst        : f.hst              ?? '–',
+    hst        : f.hst ?? mon?.hst  ?? '–',
   };
   const dec = {
     cnn_label       : f.cnn_label               ?? 'Belum dianalisis',
@@ -64,7 +139,7 @@ ATURAN WAJIB (JANGAN PERNAH DILANGGAR):
     tingkat         : f.tingkat_dosis            ?? 'Belum dianalisis',
     mitigasi        : f.status_mitigasi          ?? 'Belum dianalisis',
     cooldown        : f.sisa_cooldown_detik      ?? 0,
-    llm_advisory    : f.llm_advisory             ?? null,
+    llm_advisory    : f.llm_advisory ?? f.rekomendasi_llm ?? null,
     alasan_blokir   : f.alasan_blokir            ?? null,
   };
 
@@ -110,7 +185,8 @@ PANDUAN PERAN ANDA:
 4. Jangan merekomendasikan fungisida kimia tanpa memperingatkan dampaknya terhadap Trichoderma.
 5. Jika sensor menunjukkan kondisi berisiko, proaktif ingatkan petani tanpa menakut-nakuti.
 6. Jawab dalam Bahasa Indonesia yang ramah, singkat (maks 3 paragraf), dan mudah dipahami.
-7. JANGAN mengarang data sensor atau menampilkan data dummy — hanya gunakan fakta yang tercantum di atas.`;
+7. JANGAN mengarang data sensor atau menampilkan data dummy — hanya gunakan fakta yang tercantum di atas.
+8. JANGAN menghitung, mengubah, atau mengusulkan angka dosis/durasi pompa. Dosis dan pompa sepenuhnya diatur otomatis oleh sistem fuzzy; Anda hanya menjelaskan dan memberi saran budidaya. Jika diminta menyalakan/mematikan pompa atau mengubah dosis lewat chat, jelaskan bahwa itu tidak bisa dilakukan di sini.`;
 }
 
 // ----- Endpoint utama -----
@@ -139,17 +215,17 @@ export async function POST(request) {
     const history = rawHistory
       .filter((m) => m?.role && m?.content)
       .slice(-20)
-      .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 2000) }));
+      .map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 1000) }));
 
-    // Rakit pesan ke Groq
+    // Rakit pesan ke LLM
     const messages = [
       { role: 'system', content: buildSystemPrompt(mon) },
       ...history,
       { role: 'user', content: userMessage.slice(0, 1000) },
     ];
 
-    // Panggil Groq (menggunakan API key dari .env)
-    const reply = await callGroq(messages, { maxTokens: 768, temperature: 0.65 });
+    // Panggil Cloudflare Workers AI (kredensial dari environment variable)
+    const reply = await callCloudflare(messages, { maxTokens: 768, temperature: 0.65 });
 
     // Snapshot konteks yang dipakai (untuk debug/transparansi)
     const f = mon?.fuzzy_output || {};
@@ -168,7 +244,7 @@ export async function POST(request) {
         status_mitigasi     : f.status_mitigasi      ?? null,
         fase_hst            : f.fase_hst             ?? null,
         sisa_cooldown_detik : f.sisa_cooldown_detik  ?? null,
-        hst                 : f.hst                  ?? null,
+        hst                 : f.hst ?? mon?.hst      ?? null,
       },
     };
 
