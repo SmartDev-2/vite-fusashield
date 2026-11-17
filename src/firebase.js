@@ -32,7 +32,7 @@ export function useDb(path, last, trackTelemetry = false) {
             soil_raw: data.soil_raw,
           })
           : null;
-        const changed = initialized && telemetry !== null && telemetry !== previousTelemetry;
+        const changed = telemetry !== null && (!initialized || telemetry !== previousTelemetry);
         initialized = true;
         previousTelemetry = telemetry;
         setState((current) => [data, null, changed ? Date.now() : current[2]]);

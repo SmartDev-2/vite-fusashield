@@ -28,7 +28,7 @@ export const MSG = {
 };
 export const dash = (v) => (v === undefined || v === null ? '–' : v);
 
-/** Aktif hanya bila nilai telemetry monitoring berubah dalam lima detik terakhir. */
+/** Tetap aktif selama ada update telemetry dalam sepuluh menit terakhir. */
 export function isLiveIotData(lastTelemetryAt, now = Date.now()) {
-  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt < 5000;
+  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt <= 10 * 60 * 1000;
 }
