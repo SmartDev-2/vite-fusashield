@@ -21,21 +21,14 @@ const predictionsDb = getDatabase(predictionsApp);
 export function useDb(path, last, trackTelemetry = false) {
   const [state, setState] = useState([null, null, null]);
   useEffect(() => {
-    let previousData = null;
-    let initialized = false;
     setState([null, null, null]);
     const r = ref(db, path);
     return onValue(
       last ? query(r, limitToLast(last)) : r,
       (s) => {
         const data = s.val();
-        const fingerprint = trackTelemetry && data && typeof data === 'object'
-          ? JSON.stringify(data)
-          : null;
-        const changed = fingerprint !== null && (!initialized || fingerprint !== previousData);
-        initialized = true;
-        previousData = fingerprint;
-        setState((current) => [data, null, changed ? Date.now() : current[2]]);
+        const receivedAt = trackTelemetry && data && typeof data === 'object' ? Date.now() : null;
+        setState((current) => [data, null, receivedAt ?? current[2]]);
       },
       (e) => setState((current) => [current[0], e.message, current[2]]),
     );
