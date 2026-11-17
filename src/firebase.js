@@ -10,11 +10,11 @@ const app = initializeApp({
 });
 const db = getDatabase(app);
 
-/** Listener realtime. Kembalikan [data, error, waktu telemetry terakhir]. */
+/** Listener realtime. Kembalikan [data, error, waktu update terakhir]. */
 export function useDb(path, last, trackTelemetry = false) {
   const [state, setState] = useState([null, null, null]);
   useEffect(() => {
-    let previousTelemetry = null;
+    let previousData = null;
     let initialized = false;
     setState([null, null, null]);
     const r = ref(db, path);
@@ -22,22 +22,15 @@ export function useDb(path, last, trackTelemetry = false) {
       last ? query(r, limitToLast(last)) : r,
       (s) => {
         const data = s.val();
-        const telemetry = trackTelemetry && data && typeof data === 'object'
-          ? JSON.stringify({
-            uptime_ms: data.uptime_ms,
-            temperature: data.temperature,
-            humidity: data.humidity,
-            soil_valid: data.soil_valid,
-            soil_moisture: data.soil_moisture,
-            soil_raw: data.soil_raw,
-          })
+        const fingerprint = trackTelemetry && data && typeof data === 'object'
+          ? JSON.stringify(data)
           : null;
-        const changed = telemetry !== null && (!initialized || telemetry !== previousTelemetry);
+        const changed = fingerprint !== null && (!initialized || fingerprint !== previousData);
         initialized = true;
-        previousTelemetry = telemetry;
+        previousData = fingerprint;
         setState((current) => [data, null, changed ? Date.now() : current[2]]);
       },
-      (e) => setState([null, e.message, null]),
+      (e) => setState((current) => [current[0], e.message, current[2]]),
     );
   }, [path, last, trackTelemetry]);
   return state;
