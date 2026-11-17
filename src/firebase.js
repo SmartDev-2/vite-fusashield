@@ -10,6 +10,13 @@ const app = initializeApp({
 });
 const db = getDatabase(app);
 
+const predictionsApp = initializeApp({
+  databaseURL: import.meta.env.VITE_PREDICTIONS_FIREBASE_DATABASE_URL
+    || 'https://projectpcv-8bb52-default-rtdb.asia-southeast1.firebasedatabase.app',
+  projectId: 'projectpcv-8bb52',
+}, 'classification-results');
+const predictionsDb = getDatabase(predictionsApp);
+
 /** Listener realtime. Kembalikan [data, error, waktu update terakhir]. */
 export function useDb(path, last, trackTelemetry = false) {
   const [state, setState] = useState([null, null, null]);
@@ -34,6 +41,40 @@ export function useDb(path, last, trackTelemetry = false) {
     );
   }, [path, last, trackTelemetry]);
   return state;
+}
+
+/** Listener realtime untuk hasil klasifikasi pada project Firebase terpisah. */
+export function usePredictions() {
+  const [state, setState] = useState({
+    latest: null,
+    history: null,
+    latestError: null,
+    historyError: null,
+  });
+
+  useEffect(() => {
+    const stopLatest = onValue(
+      ref(predictionsDb, 'predictions/latest'),
+      (snapshot) => setState((current) => ({ ...current, latest: snapshot.val(), latestError: null })),
+      (error) => setState((current) => ({ ...current, latestError: error.message })),
+    );
+    const stopHistory = onValue(
+      ref(predictionsDb, 'predictions/history'),
+      (snapshot) => setState((current) => ({ ...current, history: snapshot.val(), historyError: null })),
+      (error) => setState((current) => ({ ...current, historyError: error.message })),
+    );
+
+    return () => {
+      stopLatest();
+      stopHistory();
+    };
+  }, []);
+
+  return {
+    latest: state.latest,
+    history: state.history,
+    error: state.latestError || state.historyError,
+  };
 }
 
 export function useConnected() {

@@ -25,3 +25,24 @@
 .up-info{flex:1;min-width:0;display:grid;font-size:.9rem}
 .up-info span{font-size:.82rem}
 @media (max-width:1023px){.up-grid{grid-template-columns:1fr}}
+
+/* ---------- Hasil klasifikasi citra ---------- */
+.result-page{display:grid;gap:1.25rem}
+.result-record{min-width:0}
+.result-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
+.result-meta>div{min-width:0;padding:.75rem;border:1px solid var(--line);border-radius:12px;background:#fbfdfc}
+.result-meta dt{font-size:.8rem;color:var(--mute)}
+.result-meta dd{margin:.2rem 0 0;font-weight:700;overflow-wrap:anywhere}
+.result-subtitle{margin:1.25rem 0 .75rem;font-size:.95rem}
+.result-images{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem}
+.result-images figure{margin:0;min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:14px;background:#f7faf8}
+.result-images img{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;background:#eef3f0}
+.result-images figcaption{padding:.6rem .8rem;font-size:.88rem;font-weight:700}
+.result-no-images{padding:1rem;border:1px dashed #c9d8cf;border-radius:12px;color:var(--mute);text-align:center}
+.result-recommendation{display:grid;gap:.75rem;padding:1rem;border-radius:14px;background:#f7faf8}
+.result-section-title{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+.result-section-title h4{font-size:1rem}
+.result-advice-group ul{margin:.35rem 0 0;padding-left:1.25rem}
+.result-advice-group li+li{margin-top:.25rem}
+.result-history{display:grid;gap:1rem}
+@media (max-width:760px){.result-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.result-images{grid-template-columns:1fr}}

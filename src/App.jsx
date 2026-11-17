@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useDb, useConnected } from './firebase';
+import { useDb, useConnected, usePredictions } from './firebase';
 import { CFG, isLiveIotData } from './lib';
 import { Icon, Logo } from './icons.jsx';
-import { Ringkasan, Riwayat, Foto, Perangkat } from './pages.jsx';
+import { Ringkasan, Riwayat, Foto, Perangkat, Result } from './pages.jsx';
 
 const NAV = [
   ['ringkasan', 'Ringkasan', 'grid', 'Kondisi tanaman dan keputusan pompa saat ini', Ringkasan],
   ['riwayat', 'Riwayat fuzzy', 'history', 'Catatan keputusan fuzzy dari waktu ke waktu', Riwayat],
   ['foto', 'Unggah foto', 'image', 'Unggah foto daun untuk dinilai CNN, hasilnya masuk ke riwayat fuzzy', Foto],
+  ['result', 'Result', 'image', 'Hasil klasifikasi penyakit cabai dan rekomendasi pengendalian', Result],
   ['perangkat', 'Perangkat IoT', 'chip', 'Status sensor, pompa, dan perintah terakhir', Perangkat],
 ];
 
@@ -21,6 +22,7 @@ export default function App() {
   const [mon, monErr, lastTelemetryAt] = useDb(`monitoring/${CFG.device}`, undefined, true);
   const [raw, histErr] = useDb(`history_log/${CFG.device}`, 50);
   const [pend, pendErr] = useDb(`pending_photos/${CFG.device}`, 8);
+  const predictions = usePredictions();
   const hist = Object.entries(raw || {}).map(([k, v]) => ({ k, ...v }));
   const err = monErr || histErr;
   const live = isLiveIotData(lastTelemetryAt, now.getTime());
@@ -86,7 +88,16 @@ export default function App() {
             <div className="notice bad"><Icon n="alert" size={18} />
               <span>Data Firebase tidak bisa dibaca: {err}. Periksa Rules database dan nilai VITE_FIREBASE_DATABASE_URL di file .env.</span></div>
           )}
-          <Page mon={mon} hist={hist} pending={pend} pendErr={pendErr} live={live} />
+          <Page
+            mon={mon}
+            hist={hist}
+            pending={pend}
+            pendErr={pendErr}
+            live={live}
+            latest={predictions.latest}
+            predictionHistory={predictions.history}
+            predictionError={predictions.error}
+          />
         </main>
       </div>
     </>

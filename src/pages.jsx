@@ -350,7 +350,7 @@ export function Foto({ hist, pending, pendErr }) {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.detail || `Unggahan gagal (${r.status})`);
       setFile(null);
-      setMsg({ ok: true, text: 'Foto terkirim dan menunggu dinilai CNN. Hasilnya akan masuk ke ' });
+      setMsg({ ok: true, text: 'Foto terkirim. Lihat hasil di ' });
     } catch (e) {
       setMsg({ ok: false, text: e.message || 'Unggahan gagal' });
     } finally {
@@ -388,7 +388,7 @@ export function Foto({ hist, pending, pendErr }) {
         {msg && (
           <div className={'notice up-msg ' + (msg.ok ? 'good' : 'bad')}>
             <Icon n={msg.ok ? 'check' : 'alert'} size={18} />
-            <span>{msg.text}{msg.ok && <a href="#riwayat">Riwayat fuzzy</a>}{msg.ok && '.'}</span>
+              <span>{msg.text}{msg.ok && <><a href="#riwayat">Riwayat fuzzy</a> dan <a href="#result">Result klasifikasi</a>.</>}</span>
           </div>
         )}
 
@@ -424,6 +424,133 @@ export function Foto({ hist, pending, pendErr }) {
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+const waktuProses = (value) => {
+  if (!value) return '–';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('id-ID');
+};
+
+function Rekomendasi({ recommendation }) {
+  if (!recommendation) return <p className="muted">Rekomendasi belum tersedia.</p>;
+
+  const groups = [
+    ['Tindakan segera', recommendation.tindakan_segera],
+    ['Budidaya', recommendation.budidaya],
+    ['Pengendalian hayati', recommendation.hayati],
+    ['Pengendalian kimia', recommendation.kimia],
+  ];
+
+  return (
+    <section className="result-recommendation">
+      <div className="result-section-title">
+        <h4>{recommendation.nama || 'Rekomendasi pengendalian'}</h4>
+        {recommendation.tingkat_perhatian && (
+          <span className="pill lv-waspada">Perhatian: {recommendation.tingkat_perhatian}</span>
+        )}
+      </div>
+      {recommendation.kemungkinan_penyebab && (
+        <p><b>Kemungkinan penyebab:</b> {recommendation.kemungkinan_penyebab}</p>
+      )}
+      {groups.map(([title, items]) => Array.isArray(items) && items.length > 0 && (
+        <div className="result-advice-group" key={title}>
+          <b>{title}</b>
+          <ul>{items.map((item, index) => <li key={`${title}-${index}`}>{item}</li>)}</ul>
+        </div>
+      ))}
+      {recommendation.pemantauan && (
+        <p><b>Pemantauan:</b> {recommendation.pemantauan}</p>
+      )}
+    </section>
+  );
+}
+
+function GambarProses({ record }) {
+  const images = record.processed_images;
+  if (!images) return <p className="result-no-images">Gambar hasil proses belum tersedia.</p>;
+
+  const hasImages = images.preprocess || images.segmentation || images.reconstruction;
+  if (!hasImages) return <p className="result-no-images">Gambar hasil proses belum tersedia.</p>;
+
+  return (
+    <div className="result-images">
+      {images.preprocess && (
+        <figure><img src={record.processed_images.preprocess} alt="Hasil praproses" /><figcaption>Praproses</figcaption></figure>
+      )}
+      {images.segmentation && (
+        <figure><img src={record.processed_images.segmentation} alt="Hasil segmentasi" /><figcaption>Segmentasi</figcaption></figure>
+      )}
+      {images.reconstruction && (
+        <figure><img src={record.processed_images.reconstruction} alt="Hasil rekonstruksi" /><figcaption>Rekonstruksi</figcaption></figure>
+      )}
+    </div>
+  );
+}
+
+function ResultRecord({ record, latest = false }) {
+  return (
+    <article className="card result-record">
+      <div className="card-h">
+        <h3>{latest ? 'Hasil klasifikasi terbaru' : record.prediction || 'Hasil klasifikasi'}</h3>
+        {record.status && <span className={`pill lv-${record.status === 'ok' ? 'aman' : 'waspada'}`}>{record.status}</span>}
+      </div>
+
+      <dl className="result-meta">
+        <div><dt>Waktu proses</dt><dd>{waktuProses(record.processed_at)}</dd></div>
+        <div><dt>Nama file</dt><dd title={record.image_path}>{record.image_path || '–'}</dd></div>
+        <div><dt>Prediksi</dt><dd>{record.prediction || '–'}</dd></div>
+        <div><dt>Keyakinan</dt><dd>{record.confidence || '–'}</dd></div>
+        <div><dt>Margin</dt><dd>{record.margin ?? '–'}</dd></div>
+        <div><dt>Rasio segmentasi</dt><dd>{record.mask_ratio == null ? '–' : `${record.mask_ratio} (${(record.mask_ratio * 100).toFixed(2)}%)`}</dd></div>
+      </dl>
+
+      <h4 className="result-subtitle">Tahapan pemrosesan citra</h4>
+      <GambarProses record={record} />
+
+      <h4 className="result-subtitle">Rekomendasi pengendalian</h4>
+      <Rekomendasi recommendation={record.recommendation} />
+    </article>
+  );
+}
+
+export function Result({ latest, predictionHistory, predictionError }) {
+  const history = Object.entries(predictionHistory || {})
+    .map(([id, record]) => ({ ...record, history_id: record.history_id || id }))
+    .sort((a, b) => {
+      const timeA = Date.parse(a.processed_at || '') || 0;
+      const timeB = Date.parse(b.processed_at || '') || 0;
+      return timeB - timeA;
+    });
+
+  return (
+    <div className="result-page">
+      {predictionError && (
+        <div className="notice bad"><Icon n="alert" size={18} /><span>Data klasifikasi Firebase tidak bisa dibaca: {predictionError}</span></div>
+      )}
+      {latest ? (
+        <ResultRecord record={latest} latest />
+      ) : (
+        <div className="card empty">Belum ada hasil klasifikasi terbaru.</div>
+      )}
+
+      <section className="card">
+        <div className="card-h">
+          <h3>Riwayat klasifikasi</h3>
+          <span className="muted">{history.length} hasil tersimpan</span>
+        </div>
+        {history.length === 0 ? (
+          <div className="empty small"><Icon n="history" size={22} /><span>Riwayat klasifikasi belum tersedia.</span></div>
+        ) : (
+          <div className="result-history">
+            {history.map((record) => (
+              <ResultRecord key={record.history_id} record={record} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

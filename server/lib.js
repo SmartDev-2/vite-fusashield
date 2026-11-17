@@ -10,6 +10,8 @@ const SHARED = [
   'GROQ_API_KEY', 'GROQ_MODEL', 'GROQ_MODEL_FALLBACK',
   'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MODEL_FALLBACK'
 ];
+const DEFAULT_PREDICTIONS_DATABASE_URL =
+  'https://projectpcv-8bb52-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 function readDotEnv() {
   try {
@@ -132,6 +134,18 @@ export async function fbGet(path, params = {}) {
   const url = `${env('FIREBASE_DATABASE_URL').replace(/\/$/, '')}/${path}.json?${q}`;
   const r = await fetch(url);
   if (!r.ok) throw new HttpError(502, `Firebase menolak permintaan (${r.status}). Cek Rules dan FIREBASE_DATABASE_URL`);
+  return r.json();
+}
+
+export async function predictionsFbGet(path, params = {}) {
+  const q = new URLSearchParams(params);
+  const auth = env('PREDICTIONS_FIREBASE_AUTH');
+  if (auth) q.set('auth', auth);
+  const base = env('PREDICTIONS_FIREBASE_DATABASE_URL', DEFAULT_PREDICTIONS_DATABASE_URL).replace(/\/$/, '');
+  const r = await fetch(`${base}/${path}.json?${q}`);
+  if (!r.ok) {
+    throw new HttpError(502, `Firebase klasifikasi menolak permintaan (${r.status}). Cek Rules dan PREDICTIONS_FIREBASE_DATABASE_URL`);
+  }
   return r.json();
 }
 
