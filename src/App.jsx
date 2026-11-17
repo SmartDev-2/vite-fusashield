@@ -18,12 +18,12 @@ export default function App() {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const online = useConnected();
-  const [mon, monErr] = useDb(`monitoring/${CFG.device}`);
+  const [mon, monErr, lastTelemetryAt] = useDb(`monitoring/${CFG.device}`, undefined, true);
   const [raw, histErr] = useDb(`history_log/${CFG.device}`, 50);
   const [pend, pendErr] = useDb(`pending_photos/${CFG.device}`, 8);
   const hist = Object.entries(raw || {}).map(([k, v]) => ({ k, ...v }));
   const err = monErr || histErr;
-  const live = isLiveIotData(mon);
+  const live = isLiveIotData(lastTelemetryAt, now.getTime());
 
   useEffect(() => {
     const onHash = () => { setHash(location.hash.slice(1) || 'ringkasan'); setOpen(false); window.scrollTo(0, 0); };
@@ -86,7 +86,7 @@ export default function App() {
             <div className="notice bad"><Icon n="alert" size={18} />
               <span>Data Firebase tidak bisa dibaca: {err}. Periksa Rules database dan nilai VITE_FIREBASE_DATABASE_URL di file .env.</span></div>
           )}
-          <Page mon={mon} hist={hist} pending={pend} pendErr={pendErr} />
+          <Page mon={mon} hist={hist} pending={pend} pendErr={pendErr} live={live} />
         </main>
       </div>
     </>

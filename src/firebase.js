@@ -10,17 +10,36 @@ const app = initializeApp({
 });
 const db = getDatabase(app);
 
-/** Listener realtime. Kembalikan [data, error]. `last` = ambil N data terakhir. */
-export function useDb(path, last) {
-  const [state, setState] = useState([null, null]);
+/** Listener realtime. Kembalikan [data, error, waktu telemetry terakhir]. */
+export function useDb(path, last, trackTelemetry = false) {
+  const [state, setState] = useState([null, null, null]);
   useEffect(() => {
+    let previousTelemetry = null;
+    let initialized = false;
+    setState([null, null, null]);
     const r = ref(db, path);
     return onValue(
       last ? query(r, limitToLast(last)) : r,
-      (s) => setState([s.val(), null]),
-      (e) => setState([null, e.message]),
+      (s) => {
+        const data = s.val();
+        const telemetry = trackTelemetry && data && typeof data === 'object'
+          ? JSON.stringify({
+            uptime_ms: data.uptime_ms,
+            temperature: data.temperature,
+            humidity: data.humidity,
+            soil_valid: data.soil_valid,
+            soil_moisture: data.soil_moisture,
+            soil_raw: data.soil_raw,
+          })
+          : null;
+        const changed = initialized && telemetry !== null && telemetry !== previousTelemetry;
+        initialized = true;
+        previousTelemetry = telemetry;
+        setState((current) => [data, null, changed ? Date.now() : current[2]]);
+      },
+      (e) => setState([null, e.message, null]),
     );
-  }, [path, last]);
+  }, [path, last, trackTelemetry]);
   return state;
 }
 

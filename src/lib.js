@@ -28,37 +28,7 @@ export const MSG = {
 };
 export const dash = (v) => (v === undefined || v === null ? '–' : v);
 
-/** Cek apakah data sensor di Firebase benar-benar dari IoT hidup, bukan demo atau data basi */
-export function isLiveIotData(mon) {
-  if (!mon || typeof mon !== 'object') return false;
-
-  const f = mon.fuzzy_output || {};
-  const S = f.sumber_sensor || {};
-
-  // 1. Cek apakah ada penanda DEMO eksplisit
-  const isDemo = Boolean(
-    S.temperature === 'DEMO' ||
-    S.humidity === 'DEMO' ||
-    S.soil_moisture === 'DEMO' ||
-    (typeof f.mode_keputusan === 'string' && f.mode_keputusan.toUpperCase().includes('DEMO'))
-  );
-  if (isDemo) return false;
-
-  // 2. Cek apakah status_iot eksplisit TIDAK_AKTIF atau OFFLINE
-  if (f.status_iot && f.status_iot !== 'AKTIF') return false;
-
-  // 3. Cek apakah data sudah kedaluwarsa (stale / lebih dari 15 menit yang lalu)
-  if (f.last_updated) {
-    try {
-      const t = new Date(f.last_updated.replace(' ', 'T')).getTime();
-      if (!isNaN(t)) {
-        const ageMinutes = (Date.now() - t) / 60000;
-        if (ageMinutes > 15) return false;
-      }
-    } catch {}
-  }
-
-  // 4. Pastikan setidaknya ada data sensor terbaca
-  const hasSensors = mon.temperature != null || mon.humidity != null || (mon.soil_valid && mon.soil_moisture != null);
-  return Boolean(hasSensors);
+/** Aktif hanya bila nilai telemetry monitoring berubah dalam lima detik terakhir. */
+export function isLiveIotData(lastTelemetryAt, now = Date.now()) {
+  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt < 5000;
 }

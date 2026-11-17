@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CFG, MSG, dash, isLiveIotData, level, photoUrl } from './lib';
+import { CFG, MSG, dash, level, photoUrl } from './lib';
 import { clearMonitoring } from './firebase';
 import { Icon } from './icons.jsx';
 import './upload.css';
@@ -97,15 +97,13 @@ function Metric({ icon, tone, label, value, unit, note, bar }) {
   );
 }
 
-export function Ringkasan({ mon, hist }) {
+export function Ringkasan({ mon, hist, live }) {
   const f = mon?.fuzzy_output || {};
   const S = f.sumber_sensor || {};
   const lv = level(f);
   const soilOk = !!mon?.soil_valid;
   const pumpOn = mon?.pump_status === 'ON';
   const img = photoUrl(f.foto_sumber);
-
-  const live = isLiveIotData(mon);
 
   if (!live) {
     const isDemo = Boolean(
@@ -440,9 +438,7 @@ function KV({ title, icon, rows }) {
   );
 }
 
-export function Perangkat({ mon }) {
-  const live = isLiveIotData(mon);
-
+export function Perangkat({ mon, live }) {
   if (!live) {
     return (
       <div className="card">
