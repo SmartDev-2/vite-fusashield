@@ -7,7 +7,7 @@ import { Ringkasan, Riwayat, Foto, Perangkat } from './pages.jsx';
 const NAV = [
   ['ringkasan', 'Ringkasan', 'grid', 'Kondisi tanaman dan keputusan pompa saat ini', Ringkasan],
   ['riwayat', 'Riwayat fuzzy', 'history', 'Catatan keputusan fuzzy dari waktu ke waktu', Riwayat],
-  ['foto', 'Foto daun', 'image', 'Foto daun yang sudah dianalisis CNN', Foto],
+  ['foto', 'Unggah foto', 'image', 'Unggah foto daun untuk dinilai CNN, hasilnya masuk ke riwayat fuzzy', Foto],
   ['perangkat', 'Perangkat IoT', 'chip', 'Status sensor, pompa, dan perintah terakhir', Perangkat],
 ];
 
@@ -20,6 +20,7 @@ export default function App() {
   const online = useConnected();
   const [mon, monErr] = useDb(`monitoring/${CFG.device}`);
   const [raw, histErr] = useDb(`history_log/${CFG.device}`, 50);
+  const [pend, pendErr] = useDb(`pending_photos/${CFG.device}`, 8);
   const hist = Object.entries(raw || {}).map(([k, v]) => ({ k, ...v }));
   const err = monErr || histErr;
   const live = isLiveIotData(mon);
@@ -85,10 +86,9 @@ export default function App() {
             <div className="notice bad"><Icon n="alert" size={18} />
               <span>Data Firebase tidak bisa dibaca: {err}. Periksa Rules database dan nilai VITE_FIREBASE_DATABASE_URL di file .env.</span></div>
           )}
-          <Page mon={mon} hist={hist} />
+          <Page mon={mon} hist={hist} pending={pend} pendErr={pendErr} />
         </main>
       </div>
     </>
   );
 }
-

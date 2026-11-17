@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CFG, MSG, dash, isLiveIotData, level, photoUrl } from './lib';
 import { clearMonitoring } from './firebase';
 import { Icon } from './icons.jsx';
+import './upload.css';
 
 const LEVELS = ['aman', 'preventif', 'waspada', 'kritis'];
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const hideBroken = (e) => { e.currentTarget.style.visibility = 'hidden'; };
 
- /Grafik tren dengan tooltip dan filter seri/
+/* Grafik tren dengan tooltip dan filter seri */
 const W = 720, H = 250, L = 38, R = 14, T = 12, B = 28;
 
 function Chart({ labels, series }) {
@@ -300,30 +301,131 @@ export function Riwayat({ hist }) {
   );
 }
 
-/* ---------- Foto ---------- */
-export function Foto({ hist }) {
-  const seen = new Set();
-  const items = [...hist].reverse().filter((h) => h.foto_sumber && !seen.has(h.foto_sumber) && seen.add(h.foto_sumber));
-  if (items.length === 0) {
-    return <div className="card"><div className="empty"><Icon n="camera" size={30} /><span>Belum ada foto. Foto muncul setelah daun difoto dan diproses CNN.</span></div></div>;
-  }
+/* ---------- Unggah foto ---------- */
+const MAX_PILIH = 15 * 1024 * 1024; // batas file asli, sebelum dikecilkan
+const UPLOAD_URL = '/api/upload';
+
+// Kecilkan ke maksimal 1024 px dan jadikan JPEG (sama seperti yang dilakukan API mobile)
+async function keJpeg(file, sisi = 1024) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch { throw new Error('Gambar tidak bisa dibaca. Coba pakai format JPG atau PNG.'); }
+  const skala = Math.min(1, sisi / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * skala);
+  c.height = Math.round(bmp.height * skala);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close?.();
+  return new Promise((ok, gagal) =>
+    c.toBlob((b) => (b ? ok(b) : gagal(new Error('Gagal memproses gambar'))), 'image/jpeg', 0.88));
+}
+
+export function Foto({ hist, pending, pendErr }) {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    if (!file) { setPreview(null); return; }
+    const u = URL.createObjectURL(file);
+    setPreview(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  const pilih = (f) => {
+    setMsg(null);
+    if (!f) return;
+    if (!f.type.startsWith('image/')) return setMsg({ ok: false, text: 'File harus berupa gambar (JPG, PNG, atau WEBP).' });
+    if (f.size > MAX_PILIH) return setMsg({ ok: false, text: 'Foto terlalu besar, maksimal 15 MB.' });
+    setFile(f);
+  };
+
+  const kirim = async () => {
+    if (!file || busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const blob = await keJpeg(file);
+      const r = await fetch(UPLOAD_URL, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || `Unggahan gagal (${r.status})`);
+      setFile(null);
+      setMsg({ ok: true, text: 'Foto terkirim dan menunggu dinilai CNN. Hasilnya akan masuk ke ' });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message || 'Unggahan gagal' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rows = Object.entries(pending || {})
+    .map(([k, v]) => ({ k, ...v }))
+    .filter((p) => p.path)
+    .sort((a, b) => (b.uploaded_at || 0) - (a.uploaded_at || 0));
+
   return (
-    <div className="gallery">
-      {items.map((h) => {
-        const lv = level(h);
-        return (
-          <figure className="card nopad shot" key={h.foto_sumber}>
-            <div className="shot-img">
-              <img src={photoUrl(h.foto_sumber)} alt={h.cnn_label || 'Foto daun'} loading="lazy" onError={hideBroken} />
-              <span className={`pill lv-${lv}`}>{cap(lv)}</span>
-            </div>
-            <figcaption>
-              <b>{dash(h.cnn_label)}</b>{h.cnn_confidence != null && <span className="muted"> {h.cnn_confidence}%</span>}
-              <div className="muted">{dash(h.last_updated)}</div>
-            </figcaption>
-          </figure>
-        );
-      })}
+    <div className="up-grid">
+      <div className="card">
+        <div className="card-h"><h3><Icon n="image" size={18} /> Unggah foto daun</h3><span className="muted">JPG, PNG, atau WEBP</span></div>
+
+        {preview ? (
+          <>
+            <div className="up-prev"><img src={preview} alt="Pratinjau foto daun" /></div>
+            <div className="up-name">{file.name}</div>
+          </>
+        ) : (
+          <label className={'dz' + (drag ? ' drag' : '')}
+            onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(e) => { e.preventDefault(); setDrag(false); pilih(e.dataTransfer.files[0]); }}>
+            <Icon n="camera" size={34} />
+            <b>Pilih foto atau seret ke sini</b>
+            <small>Foto akan dikecilkan otomatis sebelum dikirim</small>
+            <input type="file" accept="image/*" onChange={(e) => { pilih(e.target.files[0]); e.target.value = ''; }} />
+          </label>
+        )}
+
+        {msg && (
+          <div className={'notice up-msg ' + (msg.ok ? 'good' : 'bad')}>
+            <Icon n={msg.ok ? 'check' : 'alert'} size={18} />
+            <span>{msg.text}{msg.ok && <a href="#riwayat">Riwayat fuzzy</a>}{msg.ok && '.'}</span>
+          </div>
+        )}
+
+        {file && (
+          <div className="up-actions">
+            <button className="btn" onClick={kirim} disabled={busy}>{busy ? 'Mengunggah...' : 'Unggah dan nilai'}</button>
+            <button className="btn ghost" onClick={() => { setFile(null); setMsg(null); }} disabled={busy}>Ganti foto</button>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-h"><h3>Unggahan terakhir</h3><span className="muted">Hasil lengkap ada di Riwayat fuzzy</span></div>
+        {pendErr && <div className="notice warn up-msg"><Icon n="alert" size={18} /><span>Daftar unggahan tidak bisa dibaca: {pendErr}. Periksa Rules untuk pending_photos.</span></div>}
+        {rows.length === 0 ? (
+          <div className="empty small"><Icon n="history" size={22} /><span>Belum ada foto yang diunggah.</span></div>
+        ) : (
+          <ul className="up-list">
+            {rows.map((p) => {
+              const h = hist.find((x) => x.foto_sumber === p.path);
+              const lv = h ? level(h) : null;
+              return (
+                <li className="up-item" key={p.k}>
+                  <img className="thumb" src={photoUrl(p.path)} alt="" loading="lazy" onError={hideBroken} />
+                  <div className="up-info">
+                    <b>{p.uploaded_at ? new Date(p.uploaded_at * 1000).toLocaleString('id-ID') : '–'}</b>
+                    <span className="muted">{h ? <>{dash(h.cnn_label)}{h.cnn_confidence != null && ` ${h.cnn_confidence}%`}</> : 'Menunggu penilaian'}</span>
+                  </div>
+                  <span className={`pill lv-${lv || 'none'}`}>{h ? (lv ? cap(lv) : 'Dinilai') : 'Menunggu'}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -377,4 +479,3 @@ export function Perangkat({ mon }) {
     </div>
   );
 }
-
