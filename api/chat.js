@@ -33,9 +33,29 @@ const RATE_KEY = 'chat:mobile';
 // ----- Helper: panggil Cloudflare Workers AI (model utama -> cadangan) -----
 const CF_BASE = 'https://api.cloudflare.com/client/v4';
 
+// Diagnosa saat auth gagal: cek token ke endpoint verify (tanpa membocorkan isi token)
+async function diagnosaToken(accountId, token) {
+  const info = `panjang_token=${token.length}, awalan=${token.slice(0, 5)}, panjang_account_id=${accountId.length}`;
+  try {
+    const url = token.startsWith('cfat_')
+      ? `${CF_BASE}/accounts/${accountId}/tokens/verify`
+      : `${CF_BASE}/user/tokens/verify`;
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    const d = await r.json().catch(() => ({}));
+    return `${info}, verify_http=${r.status}, status=${d?.result?.status ?? '-'}, error=${d?.errors?.[0]?.message ?? '-'}`;
+  } catch (e) {
+    return `${info}, verify_gagal=${e?.message}`;
+  }
+}
+
 async function callCloudflare(messages, { maxTokens = 768, temperature = 0.65 } = {}) {
-  const accountId = process.env.CF_ACCOUNT_ID;
-  const token = process.env.CF_API_TOKEN;
+  // Buang spasi/baris baru/tanda kutip yang sering ikut tersalin ke env
+  const bersih = (v) => (v ?? '').trim().replace(/^["']|["']$/g, '');
+  const accountId = bersih(process.env.CF_ACCOUNT_ID);
+  const token = bersih(process.env.CF_API_TOKEN);
   if (!accountId || !token) {
     throw { status: 500, message: 'CF_ACCOUNT_ID / CF_API_TOKEN belum diset di server' };
   }
@@ -46,6 +66,7 @@ async function callCloudflare(messages, { maxTokens = 768, temperature = 0.65 } 
   ];
 
   let lastErr = 'Model tidak merespons';
+  let diagDone = false;
   for (const model of models) {
     try {
       const r = await fetch(`${CF_BASE}/accounts/${accountId}/ai/run/${model}`, {
@@ -55,12 +76,16 @@ async function callCloudflare(messages, { maxTokens = 768, temperature = 0.65 } 
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ messages, max_tokens: maxTokens, temperature }),
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(12_000),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || data.success === false) {
         lastErr = data?.errors?.[0]?.message || `HTTP ${r.status}`;
-        console.warn(`[chat] ${model} gagal: ${lastErr}`);
+        console.warn(`[chat] ${model} gagal: ${lastErr} (HTTP ${r.status})`);
+        if ((r.status === 401 || r.status === 403) && !diagDone) {
+          diagDone = true;
+          console.warn('[chat] diagnosa token:', await diagnosaToken(accountId, token));
+        }
         continue;
       }
       const result = data.result || {};
