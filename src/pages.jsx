@@ -476,6 +476,15 @@ const gambarRecord = (record) => {
   return im.preprocess || im.segmentation || im.reconstruction || null;
 };
 
+const fotoKey = (value) => {
+  if (!value) return '';
+  let path = String(value).trim().split(/[?#]/, 1)[0].replace(/\\/g, '/');
+  const storagePath = path.match(/\/storage\/v1\/object\/(?:public|sign)\/[^/]+\/(.+)$/);
+  path = (storagePath?.[1] || path).replace(/^\/+/, '');
+  try { return decodeURIComponent(path); }
+  catch { return path; }
+};
+
 /* Satu kotak besar per bagian, header-nya seragam */
 function Panel({ icon, tone, title, desc, badge, children }) {
   return (
@@ -693,10 +702,48 @@ function Modal({ judul, sub, onClose, onPrev, onNext, pos, total, children }) {
 }
 
 /* Isi jendela detail klasifikasi */
-function IsiDetail({ record }) {
+function KeputusanFuzzy({ decision }) {
+  if (!decision) {
+    return (
+      <>
+        <h3 className="rs-sub">Hasil perhitungan fuzzy</h3>
+        <p className="result-no-images">Keputusan fuzzy untuk foto ini belum tersedia atau belum cocok dengan catatan riwayat.</p>
+      </>
+    );
+  }
+
+  const fuzzyLevel = level(decision);
+  const values = [
+    ['Status mitigasi', decision.status_mitigasi],
+    ['Tingkat dosis', fuzzyLevel ? cap(fuzzyLevel) : decision.tingkat_dosis],
+    ['Dosis rekomendasi Trichoderma', decision.dosis_rekomendasi_ml, 'ml'],
+    ['Dosis yang diberikan', decision.dosis_ml, 'ml'],
+    ['Durasi pompa', decision.durasi_pompa_detik, 'detik'],
+    ['Status pompa', decision.pump_command],
+    ['Suhu udara', decision.input_suhu, '°C'],
+    ['Kelembapan udara', decision.input_kelembapan_udara, '%'],
+    ['Kelembapan tanah', decision.input_kelembapan, '%'],
+  ];
+
+  return (
+    <Panel icon="bolt" tone="green" title="Hasil perhitungan fuzzy" desc="Keputusan mitigasi dan dosis yang tercatat untuk foto ini">
+      <div className="tiles fuzzy-tiles">
+        {values.map(([label, value, unit]) => (
+          <div className="tile" key={label}>
+            <span className="tile-l">{label}</span>
+            <b className="tile-v">{value == null || value === '' ? '–' : `${value}${unit ? ` ${unit}` : ''}`}</b>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function IsiDetail({ record, fuzzyDecision }) {
   return (
     <>
       <Ringkas record={record} />
+      <KeputusanFuzzy decision={fuzzyDecision} />
       <h3 className="rs-sub">Tahapan pemrosesan citra</h3>
       <GambarProses record={record} />
       <h3 className="rs-sub">Rekomendasi pengendalian</h3>
@@ -761,7 +808,7 @@ function FilterRiwayat({ f, setF, labels, total, shown, aktif, reset }) {
 
 const FILTER_AWAL = { dari: '', sampai: '', hasil: '', urut: 'baru' };
 
-export function Result({ latest, predictionHistory, predictionError }) {
+export function Result({ latest, predictionHistory, predictionError, hist = [] }) {
   const [f, setF] = useState(FILTER_AWAL);
   const [batas, setBatas] = useState(BATCH);
   const [buka, setBuka] = useState(null); // history_id yang sedang dibuka
@@ -809,6 +856,9 @@ export function Result({ latest, predictionHistory, predictionError }) {
 
   const idx = buka ? tersaring.findIndex((r) => r.history_id === buka) : -1;
   const recordBuka = idx >= 0 ? tersaring[idx] : null;
+  const fuzzyDecision = recordBuka
+    ? hist.find((entry) => fotoKey(entry.foto_sumber) === fotoKey(recordBuka.image_path))
+    : null;
   const tutup = () => setBuka(null);
   const sebelumnya = idx > 0 ? () => setBuka(tersaring[idx - 1].history_id) : null;
   const berikutnya = idx >= 0 && idx < tersaring.length - 1 ? () => setBuka(tersaring[idx + 1].history_id) : null;
@@ -855,7 +905,7 @@ export function Result({ latest, predictionHistory, predictionError }) {
         <Modal judul="Detail klasifikasi"
           sub={`${namaHasil(recordBuka.prediction)} · ${waktuProses(recordBuka.processed_at)}`}
           onClose={tutup} onPrev={sebelumnya} onNext={berikutnya} pos={idx + 1} total={tersaring.length}>
-          <IsiDetail record={recordBuka} />
+          <IsiDetail record={recordBuka} fuzzyDecision={fuzzyDecision} />
         </Modal>
       )}
     </div>

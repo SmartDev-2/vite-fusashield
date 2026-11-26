@@ -49,6 +49,7 @@
 
 /* ---- Kotak kecil (tile) ---- */
 .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+.fuzzy-tiles .tile-v{font-size:1.35rem;overflow-wrap:anywhere}
 .tile{display:flex;flex-direction:column;gap:.35rem;min-width:0;padding:1rem 1.1rem;border:1px solid var(--line);border-radius:14px;background:#fbfdfc}
 .tile-l{font-size:.8rem;font-weight:600;color:var(--mute)}
 .tile-v{font-size:1.9rem;font-weight:800;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
