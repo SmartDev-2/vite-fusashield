@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CFG, MSG, dash, level, photoUrl } from './lib';
 import { clearMonitoring } from './firebase';
 import { Icon } from './icons.jsx';
@@ -428,129 +428,436 @@ export function Foto({ hist, pending, pendErr }) {
   );
 }
 
+/* ---------- Result: satu daftar riwayat, detail lewat tombol ---------- */
 const waktuProses = (value) => {
   if (!value) return '–';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('id-ID');
 };
 
-function Rekomendasi({ recommendation }) {
-  if (!recommendation) return <p className="muted">Rekomendasi belum tersedia.</p>;
+/* Keyakinan bisa berupa "98.5%", 0.985, atau 98.5 -> jadikan angka persen */
+const keyakinan = (value) => {
+  if (value == null || value === '') return null;
+  const n = parseFloat(String(value).replace('%', '').replace(',', '.'));
+  if (Number.isNaN(n)) return null;
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
+};
 
-  const groups = [
-    ['Tindakan segera', recommendation.tindakan_segera],
-    ['Budidaya', recommendation.budidaya],
-    ['Pengendalian hayati', recommendation.hayati],
-    ['Pengendalian kimia', recommendation.kimia],
-  ];
+/* "bercak_daun" -> "Bercak daun" */
+const namaHasil = (s) => {
+  if (s == null || s === '') return '–';
+  const t = String(s).replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
+/* Keyakinan dari model bisa berupa kata ("yakin") atau angka (98.5 / "98.5%" / 0.985) */
+const infoKeyakinan = (record) => {
+  const pct = keyakinan(record.confidence);
+  if (pct != null) {
+    const teks = `${pct.toFixed(1)}%`;
+    if (pct >= 85) return { pct, teks, singkat: `${pct.toFixed(0)}% yakin`, cls: 'lv-aman', note: 'Sistem sangat yakin dengan hasil ini' };
+    if (pct >= 60) return { pct, teks, singkat: `${pct.toFixed(0)}% yakin`, cls: 'lv-preventif', note: 'Cukup yakin, sebaiknya dicek langsung ke tanaman' };
+    return { pct, teks, singkat: `${pct.toFixed(0)}% yakin`, cls: 'lv-waspada', note: 'Kurang yakin, coba unggah foto daun yang lebih jelas' };
+  }
+  const raw = record.confidence;
+  const teks = namaHasil(raw);
+  const t = String(raw || '').toLowerCase();
+  const singkat = raw ? `Keyakinan: ${teks}` : 'Keyakinan –';
+  if (/tidak|kurang|ragu|rendah/.test(t)) return { pct: null, teks, singkat, cls: 'lv-waspada', note: 'Sistem kurang yakin, coba unggah foto daun yang lebih jelas' };
+  if (/cukup|sedang/.test(t)) return { pct: null, teks, singkat, cls: 'lv-preventif', note: 'Cukup yakin, sebaiknya dicek langsung ke tanaman' };
+  if (/yakin|tinggi|pasti/.test(t)) return { pct: null, teks, singkat, cls: 'lv-aman', note: 'Sistem yakin dengan hasil ini' };
+  return { pct: null, teks, singkat, cls: 'lv-none', note: 'Tingkat keyakinan dari model' };
+};
+
+const daunSehat = (prediction) => /sehat|healthy|normal/i.test(prediction || '');
+
+const gambarRecord = (record) => {
+  const im = record.processed_images || {};
+  return im.preprocess || im.segmentation || im.reconstruction || null;
+};
+
+/* Satu kotak besar per bagian, header-nya seragam */
+function Panel({ icon, tone, title, desc, badge, children }) {
   return (
-    <section className="result-recommendation">
-      <div className="result-section-title">
-        <h4>{recommendation.nama || 'Rekomendasi pengendalian'}</h4>
-        {recommendation.tingkat_perhatian && (
-          <span className="pill lv-waspada">Perhatian: {recommendation.tingkat_perhatian}</span>
-        )}
-      </div>
-      {recommendation.kemungkinan_penyebab && (
-        <p><b>Kemungkinan penyebab:</b> {recommendation.kemungkinan_penyebab}</p>
-      )}
-      {groups.map(([title, items]) => Array.isArray(items) && items.length > 0 && (
-        <div className="result-advice-group" key={title}>
-          <b>{title}</b>
-          <ul>{items.map((item, index) => <li key={`${title}-${index}`}>{item}</li>)}</ul>
+    <section className={`card rs rs-${tone}`}>
+      <header className="rs-h">
+        <span className="rs-ico"><Icon n={icon} size={22} /></span>
+        <div className="rs-ht">
+          <h2>{title}</h2>
+          <p>{desc}</p>
         </div>
-      ))}
-      {recommendation.pemantauan && (
-        <p><b>Pemantauan:</b> {recommendation.pemantauan}</p>
-      )}
+        {badge}
+      </header>
+      <div className="rs-b">{children}</div>
     </section>
   );
 }
 
-function GambarProses({ record }) {
-  const images = record.processed_images;
-  if (!images) return <p className="result-no-images">Gambar hasil proses belum tersedia.</p>;
-
-  const hasImages = images.preprocess || images.segmentation || images.reconstruction;
-  if (!hasImages) return <p className="result-no-images">Gambar hasil proses belum tersedia.</p>;
+/* Tiga kotak ringkasan: hasil, keyakinan, waktu */
+function Ringkas({ record }) {
+  const yk = infoKeyakinan(record);
+  const sehat = daunSehat(record.prediction);
 
   return (
-    <div className="result-images">
-      {images.preprocess && (
-        <figure><img src={record.processed_images.preprocess} alt="Hasil praproses" /><figcaption>Praproses</figcaption></figure>
+    <div className="tiles">
+      <div className={`tile ${sehat ? 'lv-aman' : 'lv-waspada'}`}>
+        <span className="tile-l">Hasil pemeriksaan</span>
+        <b className="tile-v tile-name"><i className="dot" />{namaHasil(record.prediction)}</b>
+        <span className="tile-n">{sehat ? 'Daun terlihat sehat' : 'Daun terindikasi terserang penyakit'}</span>
+      </div>
+
+      <div className={`tile ${yk.cls}`}>
+        <span className="tile-l">Tingkat keyakinan sistem</span>
+        <b className="tile-v">{yk.teks}</b>
+        {yk.pct != null && <div className="tile-bar"><i style={{ width: `${yk.pct}%` }} /></div>}
+        <span className="tile-n">{yk.note}</span>
+      </div>
+
+      <div className="tile">
+        <span className="tile-l">Waktu diperiksa</span>
+        <b className="tile-v tile-time">{waktuProses(record.processed_at)}</b>
+        <span className="tile-n">{record.status === 'ok' ? 'Proses berhasil' : record.status ? `Status: ${record.status}` : 'Foto daun terbaru'}</span>
+      </div>
+    </div>
+  );
+}
+
+/* Proses gambar: 3 kotak sejajar, bernomor */
+function GambarProses({ record }) {
+  const images = record.processed_images;
+  const hasImages = images && (images.preprocess || images.segmentation || images.reconstruction);
+  if (!hasImages) return <p className="result-no-images">Gambar hasil proses belum tersedia.</p>;
+
+  const steps = [
+    ['preprocess', 'Praproses', 'Foto dirapikan supaya mudah dibaca sistem'],
+    ['segmentation', 'Segmentasi', 'Bagian daun dipisahkan dari latar belakang'],
+    ['reconstruction', 'Rekonstruksi', 'Bagian yang bermasalah ditandai'],
+  ].filter(([key]) => images[key]);
+
+  return (
+    <ol className="steps">
+      {steps.map(([key, title, desc], i) => (
+        <li key={key} className="step">
+          <div className="step-img">
+            <span className="step-no">{i + 1}</span>
+            <img src={images[key]} alt={`Hasil ${title.toLowerCase()}`} />
+          </div>
+          <div className="step-txt"><b>{title}</b><span>{desc}</span></div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/* Detail teknis dilipat supaya tidak ramai */
+function DetailTeknis({ record }) {
+  return (
+    <details className="tech">
+      <summary>Detail teknis <small>(untuk yang ingin tahu lebih dalam)</small></summary>
+      <dl className="tech-grid">
+        <div><dt>Nama file foto</dt><dd title={record.image_path}>{record.image_path || '–'}</dd></div>
+        <div><dt>Status proses</dt><dd>{record.status || '–'}</dd></div>
+        <div><dt>Margin (jarak skor ke dugaan lain)</dt><dd>{record.margin ?? '–'}</dd></div>
+        <div><dt>Rasio segmentasi</dt><dd>{record.mask_ratio == null ? '–' : `${record.mask_ratio} (${(record.mask_ratio * 100).toFixed(2)}%)`}</dd></div>
+      </dl>
+    </details>
+  );
+}
+
+/* Rekomendasi: tiap jenis tindakan jadi satu kotak */
+function Rekomendasi({ recommendation }) {
+  if (!recommendation) return <p className="result-no-images">Rekomendasi belum tersedia.</p>;
+
+  const groups = [
+    ['Tindakan segera', 'Lakukan hari ini', 'urgent', recommendation.tindakan_segera],
+    ['Budidaya', 'Perawatan tanaman', 'care', recommendation.budidaya],
+    ['Pengendalian hayati', 'Pakai bahan alami', 'bio', recommendation.hayati],
+    ['Pengendalian kimia', 'Pilihan terakhir', 'chem', recommendation.kimia],
+  ].filter(([, , , items]) => Array.isArray(items) && items.length > 0);
+
+  return (
+    <div className="reco">
+      <div className="reco-name">{recommendation.nama || 'Rekomendasi pengendalian'}</div>
+
+      {recommendation.kemungkinan_penyebab && (
+        <div className="tile tile-wide">
+          <span className="tile-l">Kemungkinan penyebab</span>
+          <p>{recommendation.kemungkinan_penyebab}</p>
+        </div>
       )}
-      {images.segmentation && (
-        <figure><img src={record.processed_images.segmentation} alt="Hasil segmentasi" /><figcaption>Segmentasi</figcaption></figure>
+
+      {groups.length > 0 && (
+        <div className="reco-grid">
+          {groups.map(([title, hint, tone, items]) => (
+            <div className={`reco-box rc-${tone}`} key={title}>
+              <div className="reco-box-h"><b>{title}</b><small>{hint}</small></div>
+              <ul>{items.map((item, index) => <li key={`${title}-${index}`}>{item}</li>)}</ul>
+            </div>
+          ))}
+        </div>
       )}
-      {images.reconstruction && (
-        <figure><img src={record.processed_images.reconstruction} alt="Hasil rekonstruksi" /><figcaption>Rekonstruksi</figcaption></figure>
+
+      {recommendation.pemantauan && (
+        <div className="tile tile-wide">
+          <span className="tile-l">Pemantauan lanjutan</span>
+          <p>{recommendation.pemantauan}</p>
+        </div>
       )}
     </div>
   );
 }
 
-function ResultRecord({ record, latest = false }) {
+/* Satu baris riwayat: ringkas, ada tombol Detail */
+function BarisRiwayat({ record, onBuka, terbaru }) {
+  const thumb = gambarRecord(record);
+  const yk = infoKeyakinan(record);
+  const sehat = daunSehat(record.prediction);
+
   return (
-    <article className="card result-record">
-      <div className="card-h">
-        <h3>{latest ? 'Hasil klasifikasi terbaru' : record.prediction || 'Hasil klasifikasi'}</h3>
-        {record.status && <span className={`pill lv-${record.status === 'ok' ? 'aman' : 'waspada'}`}>{record.status}</span>}
-      </div>
-
-      <dl className="result-meta">
-        <div><dt>Waktu proses</dt><dd>{waktuProses(record.processed_at)}</dd></div>
-        <div><dt>Nama file</dt><dd title={record.image_path}>{record.image_path || '–'}</dd></div>
-        <div><dt>Prediksi</dt><dd>{record.prediction || '–'}</dd></div>
-        <div><dt>Keyakinan</dt><dd>{record.confidence || '–'}</dd></div>
-        <div><dt>Margin</dt><dd>{record.margin ?? '–'}</dd></div>
-        <div><dt>Rasio segmentasi</dt><dd>{record.mask_ratio == null ? '–' : `${record.mask_ratio} (${(record.mask_ratio * 100).toFixed(2)}%)`}</dd></div>
-      </dl>
-
-      <h4 className="result-subtitle">Tahapan pemrosesan citra</h4>
-      <GambarProses record={record} />
-
-      <h4 className="result-subtitle">Rekomendasi pengendalian</h4>
-      <Rekomendasi recommendation={record.recommendation} />
-    </article>
+    <li className={`hl-row ${sehat ? 'lv-aman' : 'lv-waspada'}`}>
+      <span className="hl-foto">
+        {thumb ? <img src={thumb} alt="" loading="lazy" /> : <span className="ph"><Icon n="leaf" size={20} /></span>}
+      </span>
+      <span className="hl-hasil">
+        <b>{namaHasil(record.prediction)}{terbaru && <em className="tag-baru">Terbaru</em>}</b>
+        <small title={record.image_path}>{record.image_path || '–'}</small>
+      </span>
+      <span className="hl-waktu">{waktuProses(record.processed_at)}</span>
+      <span className="hl-yakin"><span className={`pill ${yk.cls}`}>{yk.singkat}</span></span>
+      <span className="hl-aksi">
+        <button type="button" className="btn ghost sm" onClick={onBuka}>Detail</button>
+      </span>
+    </li>
   );
 }
 
+/* Kerangka daftar: judul kolom + baris-baris */
+function ListBox({ kolom, children }) {
+  return (
+    <div className="hl">
+      <div className="hl-head" aria-hidden="true">
+        {kolom.map((k, i) => <span key={i}>{k}</span>)}
+      </div>
+      <ul className="hl-body">{children}</ul>
+    </div>
+  );
+}
+
+/* Jendela detail: muncul saat tombol Detail ditekan */
+function Modal({ judul, sub, onClose, onPrev, onNext, pos, total, children }) {
+  const bodyRef = useRef(null);
+
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft' && onPrev) onPrev();
+      else if (e.key === 'ArrowRight' && onNext) onNext();
+    };
+    window.addEventListener('keydown', key);
+    const lama = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', key);
+      document.body.style.overflow = lama;
+    };
+  }, [onClose, onPrev, onNext]);
+
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [sub]);
+
+  return (
+    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-judul">
+        <header className="modal-h">
+          <div className="modal-t">
+            <h2 id="modal-judul">{judul}</h2>
+            <p>{sub}</p>
+          </div>
+          <button type="button" className="modal-x" aria-label="Tutup" onClick={onClose}>✕</button>
+        </header>
+
+        <div className="modal-b" ref={bodyRef}>{children}</div>
+
+        <footer className="modal-f">
+          {total ? (
+            <div className="modal-nav">
+              <button type="button" className="btn ghost sm" disabled={!onPrev} onClick={onPrev}>‹ Sebelumnya</button>
+              <span>{pos} dari {total}</span>
+              <button type="button" className="btn ghost sm" disabled={!onNext} onClick={onNext}>Berikutnya ›</button>
+            </div>
+          ) : <span />}
+          <button type="button" className="btn sm" onClick={onClose}>Tutup</button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/* Isi jendela detail klasifikasi */
+function IsiDetail({ record }) {
+  return (
+    <>
+      <Ringkas record={record} />
+      <h3 className="rs-sub">Tahapan pemrosesan citra</h3>
+      <GambarProses record={record} />
+      <h3 className="rs-sub">Rekomendasi pengendalian</h3>
+      <Rekomendasi recommendation={record.recommendation} />
+      <DetailTeknis record={record} />
+    </>
+  );
+}
+
+/* ---------- Filter riwayat ---------- */
+const BATCH = 10;
+const dua = (n) => String(n).padStart(2, '0');
+const isoTanggal = (d) => `${d.getFullYear()}-${dua(d.getMonth() + 1)}-${dua(d.getDate())}`;
+const hariLalu = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return isoTanggal(d); };
+
+function FilterRiwayat({ f, setF, labels, total, shown, aktif, reset }) {
+  const preset = [
+    ['Semua', '', ''],
+    ['Hari ini', hariLalu(0), hariLalu(0)],
+    ['7 hari terakhir', hariLalu(6), hariLalu(0)],
+    ['30 hari terakhir', hariLalu(29), hariLalu(0)],
+  ];
+  const ubah = (patch) => setF({ ...f, ...patch });
+
+  return (
+    <div className="rs-filter">
+      <div className="rs-presets" role="group" aria-label="Rentang waktu cepat">
+        {preset.map(([nama, dari, sampai]) => (
+          <button key={nama} type="button" className={'chip' + (f.dari === dari && f.sampai === sampai ? ' on' : '')}
+            onClick={() => ubah({ dari, sampai })}>{nama}</button>
+        ))}
+      </div>
+
+      <div className="rs-fields">
+        <label className="fld">Dari tanggal
+          <input type="date" value={f.dari} max={f.sampai || undefined} onChange={(e) => ubah({ dari: e.target.value })} />
+        </label>
+        <label className="fld">Sampai tanggal
+          <input type="date" value={f.sampai} min={f.dari || undefined} onChange={(e) => ubah({ sampai: e.target.value })} />
+        </label>
+        <label className="fld">Hasil klasifikasi
+          <select value={f.hasil} onChange={(e) => ubah({ hasil: e.target.value })}>
+            <option value="">Semua hasil</option>
+            {labels.map((l) => <option key={l} value={l}>{namaHasil(l)}</option>)}
+          </select>
+        </label>
+        <label className="fld">Urutkan
+          <select value={f.urut} onChange={(e) => ubah({ urut: e.target.value })}>
+            <option value="baru">Terbaru dulu</option>
+            <option value="lama">Terlama dulu</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="rs-filter-foot">
+        <span>Menampilkan <b>{shown}</b> dari <b>{total}</b> hasil</span>
+        {aktif && <button type="button" className="btn ghost sm" onClick={reset}>Reset filter</button>}
+      </div>
+    </div>
+  );
+}
+
+const FILTER_AWAL = { dari: '', sampai: '', hasil: '', urut: 'baru' };
+
 export function Result({ latest, predictionHistory, predictionError }) {
-  const history = Object.entries(predictionHistory || {})
-    .map(([id, record]) => ({ ...record, history_id: record.history_id || id }))
-    .sort((a, b) => {
-      const timeA = Date.parse(a.processed_at || '') || 0;
-      const timeB = Date.parse(b.processed_at || '') || 0;
-      return timeB - timeA;
-    });
+  const [f, setF] = useState(FILTER_AWAL);
+  const [batas, setBatas] = useState(BATCH);
+  const [buka, setBuka] = useState(null); // history_id yang sedang dibuka
+
+  useEffect(() => { setBatas(BATCH); }, [f.dari, f.sampai, f.hasil, f.urut]);
+
+  /* Semua hasil jadi satu daftar. "Terbaru" ikut masuk kalau belum ada di riwayat. */
+  const semua = Object.entries(predictionHistory || {})
+    .map(([id, record]) => ({ ...record, history_id: record.history_id || id }));
+
+  if (latest) {
+    const sudahAda = semua.some((r) => (latest.history_id && r.history_id === latest.history_id)
+      || (r.image_path === latest.image_path && r.processed_at === latest.processed_at));
+    if (!sudahAda) semua.push({ ...latest, history_id: latest.history_id || 'terbaru' });
+  }
+
+  semua.sort((a, b) => {
+    const timeA = Date.parse(a.processed_at || '') || 0;
+    const timeB = Date.parse(b.processed_at || '') || 0;
+    return timeB - timeA;
+  });
+
+  const idTerbaru = semua[0]?.history_id;
+  const labels = [...new Set(semua.map((r) => r.prediction).filter(Boolean))].sort();
+
+  const mulai = f.dari ? new Date(`${f.dari}T00:00:00`).getTime() : null;
+  const akhir = f.sampai ? new Date(`${f.sampai}T23:59:59.999`).getTime() : null;
+
+  const tersaring = semua.filter((r) => {
+    if (f.hasil && r.prediction !== f.hasil) return false;
+    if (mulai != null || akhir != null) {
+      const t = Date.parse(r.processed_at || '');
+      if (!t) return false;
+      if (mulai != null && t < mulai) return false;
+      if (akhir != null && t > akhir) return false;
+    }
+    return true;
+  });
+  if (f.urut === 'lama') tersaring.reverse();
+
+  const tampil = tersaring.slice(0, batas);
+  const aktif = Boolean(f.dari || f.sampai || f.hasil || f.urut !== 'baru');
+  const reset = () => setF(FILTER_AWAL);
+  const KOLOM = ['Foto', 'Hasil', 'Waktu diperiksa', 'Keyakinan', ''];
+
+  const idx = buka ? tersaring.findIndex((r) => r.history_id === buka) : -1;
+  const recordBuka = idx >= 0 ? tersaring[idx] : null;
+  const tutup = () => setBuka(null);
+  const sebelumnya = idx > 0 ? () => setBuka(tersaring[idx - 1].history_id) : null;
+  const berikutnya = idx >= 0 && idx < tersaring.length - 1 ? () => setBuka(tersaring[idx + 1].history_id) : null;
 
   return (
     <div className="result-page">
       {predictionError && (
         <div className="notice bad"><Icon n="alert" size={18} /><span>Data klasifikasi Firebase tidak bisa dibaca: {predictionError}</span></div>
       )}
-      {latest ? (
-        <ResultRecord record={latest} latest />
-      ) : (
-        <div className="card empty">Belum ada hasil klasifikasi terbaru.</div>
-      )}
 
-      <section className="card">
-        <div className="card-h">
-          <h3>Riwayat klasifikasi</h3>
-          <span className="muted">{history.length} hasil tersimpan</span>
-        </div>
-        {history.length === 0 ? (
-          <div className="empty small"><Icon n="history" size={22} /><span>Riwayat klasifikasi belum tersedia.</span></div>
+      <Panel icon="history" tone="gray" title="Riwayat klasifikasi" desc="Pemeriksaan sebelumnya. Tekan tombol Detail untuk melihat selengkapnya"
+        badge={<span className="rs-count">{aktif ? `${tersaring.length} / ${semua.length}` : semua.length} hasil</span>}>
+        {semua.length === 0 ? (
+          <div className="empty"><Icon n="leaf" size={32} /><span>Belum ada hasil klasifikasi. Unggah foto daun di menu Unggah foto dulu.</span></div>
         ) : (
-          <div className="result-history">
-            {history.map((record) => (
-              <ResultRecord key={record.history_id} record={record} />
-            ))}
-          </div>
+          <>
+            <FilterRiwayat f={f} setF={setF} labels={labels} total={semua.length} shown={tersaring.length} aktif={aktif} reset={reset} />
+            {tersaring.length === 0 ? (
+              <div className="empty small">
+                <Icon n="history" size={22} />
+                <span>Tidak ada hasil yang cocok dengan filter ini.</span>
+                <button type="button" className="btn ghost sm" onClick={reset}>Reset filter</button>
+              </div>
+            ) : (
+              <ListBox kolom={KOLOM}>
+                {tampil.map((record) => (
+                  <BarisRiwayat key={record.history_id} record={record} terbaru={record.history_id === idTerbaru}
+                    onBuka={() => setBuka(record.history_id)} />
+                ))}
+              </ListBox>
+            )}
+            {tersaring.length > tampil.length && (
+              <div className="hist-more">
+                <button type="button" className="btn ghost" onClick={() => setBatas(batas + BATCH)}>
+                  Tampilkan {Math.min(BATCH, tersaring.length - tampil.length)} lagi (sisa {tersaring.length - tampil.length})
+                </button>
+              </div>
+            )}
+          </>
         )}
-      </section>
+      </Panel>
+
+      {recordBuka && (
+        <Modal judul="Detail klasifikasi"
+          sub={`${namaHasil(recordBuka.prediction)} · ${waktuProses(recordBuka.processed_at)}`}
+          onClose={tutup} onPrev={sebelumnya} onNext={berikutnya} pos={idx + 1} total={tersaring.length}>
+          <IsiDetail record={recordBuka} />
+        </Modal>
+      )}
     </div>
   );
 }
