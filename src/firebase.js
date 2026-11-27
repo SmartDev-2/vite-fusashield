@@ -17,6 +17,16 @@ const predictionsApp = initializeApp({
 }, 'classification-results');
 const predictionsDb = getDatabase(predictionsApp);
 
+let lastKnownUptime = null;
+let lastKnownTelemetryAt = null;
+
+try {
+  const cachedTime = Number(localStorage.getItem('fs_last_telemetry'));
+  if (Number.isFinite(cachedTime)) lastKnownTelemetryAt = cachedTime;
+  const cachedUpt = Number(localStorage.getItem('fs_last_uptime'));
+  if (Number.isFinite(cachedUpt)) lastKnownUptime = cachedUpt;
+} catch {}
+
 /** Listener realtime. Kembalikan [data, error, waktu update terakhir]. */
 export function useDb(path, last, trackTelemetry = false) {
   const [state, setState] = useState([null, null, null]);
@@ -28,21 +38,53 @@ export function useDb(path, last, trackTelemetry = false) {
       (s) => {
         const data = s.val();
         let telemetryAt = null;
+
         if (trackTelemetry && data && typeof data === 'object') {
-          // Gunakan timestamp dari data Firebase (bukan waktu browser menerima)
-          // Coba last_active_epoch (UNIX detik) lalu fuzzy_output.last_updated (string WIB)
-          const epoch = data.fuzzy_output?.last_active_epoch;
-          if (typeof epoch === 'number' && epoch > 0) {
-            telemetryAt = epoch * 1000; // detik → ms
-          } else {
-            const str = data.fuzzy_output?.last_updated;
-            if (str) {
-              // Format: "2026-11-10 09:05:10" dalam WIB (UTC+7)
-              const ms = new Date(str.replace(' ', 'T') + '+07:00').getTime();
-              if (Number.isFinite(ms)) telemetryAt = ms;
+          const now = Date.now();
+          const currentUptime = typeof data.uptime_ms === 'number' ? data.uptime_ms : null;
+          const hasSensors = data.temperature != null || data.humidity != null;
+
+          // Cek apakah ada epoch waktu nyata di root data
+          const explicitEpoch = data.last_telemetry_epoch || data.last_active_epoch || data.epoch || data.timestamp;
+          if (typeof explicitEpoch === 'number' && explicitEpoch > 0) {
+            telemetryAt = explicitEpoch > 1e11 ? explicitEpoch : explicitEpoch * 1000;
+          } else if (currentUptime != null || hasSensors) {
+            // Stopwatch berbasis kedatangan data telemetri:
+            // 1. Jika uptime_ms berubah dari data sebelumnya -> ESP32 aktif mengirim data baru!
+            if (currentUptime != null && lastKnownUptime != null && currentUptime !== lastKnownUptime) {
+              telemetryAt = now;
+              lastKnownTelemetryAt = now;
+              lastKnownUptime = currentUptime;
+              try {
+                localStorage.setItem('fs_last_telemetry', String(now));
+                localStorage.setItem('fs_last_uptime', String(currentUptime));
+              } catch {}
+            }
+            // 2. Jika pertama kali menerima data:
+            else if (lastKnownUptime == null) {
+              lastKnownUptime = currentUptime;
+              if (lastKnownTelemetryAt && (now - lastKnownTelemetryAt) <= 10 * 60 * 1000) {
+                telemetryAt = lastKnownTelemetryAt;
+              } else {
+                telemetryAt = now;
+                lastKnownTelemetryAt = now;
+                try {
+                  localStorage.setItem('fs_last_telemetry', String(now));
+                  if (currentUptime != null) localStorage.setItem('fs_last_uptime', String(currentUptime));
+                } catch {}
+              }
+            }
+            // 3. Jika onValue terpanggil lagi (ada update dari Firebase)
+            else {
+              telemetryAt = now;
+              lastKnownTelemetryAt = now;
+              try {
+                localStorage.setItem('fs_last_telemetry', String(now));
+              } catch {}
             }
           }
         }
+
         setState((current) => [data, null, telemetryAt ?? current[2]]);
       },
       (e) => setState((current) => [current[0], e.message, current[2]]),
