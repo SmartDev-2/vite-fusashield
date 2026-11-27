@@ -37,8 +37,8 @@ export async function GET(request) {
         soil_moisture: null,
         pump_status: null,
       },
-      decision: iotActive ? pick(f, DECISION_KEYS) : {},
-      photo_url: iotActive ? await photoUrl(f.foto_sumber) : null,
+      decision: pick(f, DECISION_KEYS),
+      photo_url: await photoUrl(f.foto_sumber),
     });
   });
 }
