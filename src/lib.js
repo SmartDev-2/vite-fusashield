@@ -30,5 +30,8 @@ export const dash = (v) => (v === undefined || v === null ? '–' : v);
 
 /** Toleransi gangguan jaringan: tandai offline setelah 10 menit tanpa heartbeat. */
 export function isLiveIotData(lastTelemetryAt, now = Date.now()) {
-  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt <= 10 * 60 * 1000;
+  const maxClockSkewMs = 5 * 1000;
+  return Number.isFinite(lastTelemetryAt)
+    && lastTelemetryAt <= now + maxClockSkewMs
+    && now - lastTelemetryAt <= 10 * 60 * 1000;
 }
