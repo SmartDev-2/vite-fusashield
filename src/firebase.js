@@ -54,9 +54,7 @@ export function useDb(path, last, trackTelemetry = false) {
             ? null
             : Number(data.uptime_ms);
           const hasUptime = Number.isFinite(currentUptime);
-          const explicitEpoch = parseEpochMs(
-            data.last_telemetry_epoch || data.last_active_epoch || data.epoch || data.timestamp,
-          );
+          const explicitEpoch = parseEpochMs(data.last_telemetry_epoch || data.last_active_epoch);
           const sensorSnapshot = JSON.stringify([
             data.temperature,
             data.humidity,
@@ -64,17 +62,18 @@ export function useDb(path, last, trackTelemetry = false) {
             data.soil_valid,
           ]);
 
-          if (explicitEpoch != null) {
-            telemetryAt = explicitEpoch;
-            lastKnownTelemetryAt = explicitEpoch;
-            if (hasUptime) lastKnownUptime = currentUptime;
-            lastKnownSensors = sensorSnapshot;
-          } else if (hasUptime) {
+          if (hasUptime) {
             if (lastKnownUptime == null || currentUptime !== lastKnownUptime) {
               lastKnownUptime = currentUptime;
               lastKnownTelemetryAt = now;
+            } else if (explicitEpoch != null && explicitEpoch > lastKnownTelemetryAt) {
+              lastKnownTelemetryAt = explicitEpoch;
             }
             telemetryAt = lastKnownTelemetryAt;
+            lastKnownSensors = sensorSnapshot;
+          } else if (explicitEpoch != null) {
+            telemetryAt = explicitEpoch;
+            lastKnownTelemetryAt = explicitEpoch;
             lastKnownSensors = sensorSnapshot;
           } else if (sensorSnapshot !== lastKnownSensors) {
             lastKnownSensors = sensorSnapshot;

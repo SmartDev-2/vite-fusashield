@@ -28,7 +28,7 @@ nav{display:grid;gap:.2rem;align-content:start;flex:1}
 .dev-card{display:flex;align-items:center;gap:.75rem;padding:.8rem;border-radius:14px;background:var(--side-2);border:1px solid rgba(255,255,255,.07)}
 .dev-ico{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:rgba(47,180,124,.2);color:#6fe0ae}
 .dev-name{color:#fff;font-weight:700;line-height:1.2}
-.dev-sub{font-size:.8rem;color:#8fb3a2}
+.dev-sub{font-size:.8rem;color:#8fb3a2;transition:color .25s ease}
 .scrim{display:none}
 
 /* ---------- Topbar ---------- */
@@ -39,7 +39,7 @@ nav{display:grid;gap:.2rem;align-content:start;flex:1}
 .top-title p{font-size:.85rem;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-right{display:flex;align-items:center;gap:1.1rem}
 .burger{display:none;place-items:center;width:42px;height:42px;border:1px solid var(--line);background:#fff;border-radius:12px;cursor:pointer}
-.conn{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .85rem;border-radius:99px;font-size:.85rem;font-weight:600}
+.conn{display:inline-flex;align-items:center;gap:.5rem;padding:.4rem .85rem;border-radius:99px;font-size:.85rem;font-weight:600;transition:background-color .25s ease,color .25s ease}
 .conn i{width:8px;height:8px;border-radius:50%;background:currentColor}
 .conn.ok{background:var(--brand-t);color:var(--brand-d)}
 .conn.ok i{box-shadow:0 0 0 0 rgba(47,180,124,.5);animation:ping 2.2s infinite}
