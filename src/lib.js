@@ -28,7 +28,7 @@ export const MSG = {
 };
 export const dash = (v) => (v === undefined || v === null ? '–' : v);
 
-/** Tetap aktif selama ada update telemetry dalam sepuluh menit terakhir. */
+/** ESP32 mengirim telemetri tiap 10 detik; anggap offline setelah 45 detik tanpa update. */
 export function isLiveIotData(lastTelemetryAt, now = Date.now()) {
-  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt <= 10 * 60 * 1000;
+  return Number.isFinite(lastTelemetryAt) && now >= lastTelemetryAt && now - lastTelemetryAt <= 45 * 1000;
 }
