@@ -27,8 +27,23 @@ export function useDb(path, last, trackTelemetry = false) {
       last ? query(r, limitToLast(last)) : r,
       (s) => {
         const data = s.val();
-        const receivedAt = trackTelemetry && data && typeof data === 'object' ? Date.now() : null;
-        setState((current) => [data, null, receivedAt ?? current[2]]);
+        let telemetryAt = null;
+        if (trackTelemetry && data && typeof data === 'object') {
+          // Gunakan timestamp dari data Firebase (bukan waktu browser menerima)
+          // Coba last_active_epoch (UNIX detik) lalu fuzzy_output.last_updated (string WIB)
+          const epoch = data.fuzzy_output?.last_active_epoch;
+          if (typeof epoch === 'number' && epoch > 0) {
+            telemetryAt = epoch * 1000; // detik → ms
+          } else {
+            const str = data.fuzzy_output?.last_updated;
+            if (str) {
+              // Format: "2026-11-10 09:05:10" dalam WIB (UTC+7)
+              const ms = new Date(str.replace(' ', 'T') + '+07:00').getTime();
+              if (Number.isFinite(ms)) telemetryAt = ms;
+            }
+          }
+        }
+        setState((current) => [data, null, telemetryAt ?? current[2]]);
       },
       (e) => setState((current) => [current[0], e.message, current[2]]),
     );
