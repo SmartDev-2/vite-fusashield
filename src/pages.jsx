@@ -303,6 +303,32 @@ export function Riwayat({ hist }) {
 const MAX_PILIH = 15 * 1024 * 1024; // batas file asli, sebelum dikecilkan
 const API = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
+/* Keyakinan bisa berupa "98.5%", 0.985, atau 98.5 -> jadikan angka persen */
+const keyakinan = (value) => {
+  if (value == null || value === '') return null;
+  const n = parseFloat(String(value).replace('%', '').replace(',', '.'));
+  if (Number.isNaN(n)) return null;
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
+};
+
+/* "bercak_daun" -> "Bercak daun" */
+const namaHasil = (s) => {
+  if (s == null || s === '') return '–';
+  const t = String(s).replace(/_/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+const daunSehat = (prediction) => /sehat|healthy|normal/i.test(prediction || '');
+
+const fotoKey = (value) => {
+  if (!value) return '';
+  let path = String(value).trim().split(/[?#]/, 1)[0].replace(/\\/g, '/');
+  const storagePath = path.match(/\/storage\/v1\/object\/(?:public|sign)\/[^/]+\/(.+)$/);
+  path = (storagePath?.[1] || path).replace(/^\/+/, '');
+  try { return decodeURIComponent(path); }
+  catch { return path; }
+};
+
 // Kecilkan ke maksimal 1024 px dan jadikan JPEG (sama seperti yang dilakukan API mobile)
 async function keJpeg(file, sisi = 1024) {
   let bmp;
@@ -318,7 +344,7 @@ async function keJpeg(file, sisi = 1024) {
     c.toBlob((b) => (b ? ok(b) : gagal(new Error('Gagal memproses gambar'))), 'image/jpeg', 0.88));
 }
 
-export function Foto({ hist, pending, pendErr }) {
+export function Foto({ hist = [], pending, pendErr, latest, predictionHistory }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -401,23 +427,49 @@ export function Foto({ hist, pending, pendErr }) {
       </div>
 
       <div className="card">
-        <div className="card-h"><h3>Unggahan terakhir</h3><span className="muted">Hasil lengkap ada di Riwayat fuzzy</span></div>
+        <div className="card-h"><h3>Unggahan terakhir</h3><span className="muted">Hasil lengkap ada di Riwayat fuzzy dan Result</span></div>
         {pendErr && <div className="notice warn up-msg"><Icon n="alert" size={18} /><span>Daftar unggahan tidak bisa dibaca: {pendErr}. Periksa Rules untuk pending_photos.</span></div>}
         {rows.length === 0 ? (
           <div className="empty small"><Icon n="history" size={22} /><span>Belum ada foto yang diunggah.</span></div>
         ) : (
           <ul className="up-list">
             {rows.map((p) => {
-              const h = hist.find((x) => x.foto_sumber === p.path);
-              const lv = h ? level(h) : null;
+              const pKey = fotoKey(p.path);
+              const h = hist.find((x) => fotoKey(x.foto_sumber) === pKey);
+
+              // Cek juga ke predictions (hasil klasifikasi PCV/CNN) jika tidak ada di history_log
+              let pred = null;
+              if (!h) {
+                const allPreds = Object.values(predictionHistory || {});
+                if (latest) allPreds.push(latest);
+                pred = allPreds.find((r) => fotoKey(r.image_path) === pKey);
+              }
+
+              let cnnText = 'Menunggu penilaian';
+              let badgePill = 'Menunggu';
+              let pillCls = 'lv-none';
+
+              if (h) {
+                const lv = level(h);
+                cnnText = `${dash(h.cnn_label)}${h.cnn_confidence != null ? ` ${h.cnn_confidence}%` : ''}`;
+                badgePill = lv ? cap(lv) : 'Dinilai';
+                pillCls = lv ? `lv-${lv}` : 'lv-none';
+              } else if (pred) {
+                const pct = keyakinan(pred.confidence);
+                cnnText = `${namaHasil(pred.prediction)}${pct != null ? ` ${pct.toFixed(1)}%` : ''}`;
+                const sehat = daunSehat(pred.prediction);
+                badgePill = sehat ? 'Aman' : 'Terdeteksi';
+                pillCls = sehat ? 'lv-aman' : 'lv-waspada';
+              }
+
               return (
                 <li className="up-item" key={p.k}>
                   <img className="thumb" src={photoUrl(p.path)} alt="" loading="lazy" onError={hideBroken} />
                   <div className="up-info">
                     <b>{p.uploaded_at ? new Date(p.uploaded_at * 1000).toLocaleString('id-ID') : '–'}</b>
-                    <span className="muted">{h ? <>{dash(h.cnn_label)}{h.cnn_confidence != null && ` ${h.cnn_confidence}%`}</> : 'Menunggu penilaian'}</span>
+                    <span className="muted">{cnnText}</span>
                   </div>
-                  <span className={`pill lv-${lv || 'none'}`}>{h ? (lv ? cap(lv) : 'Dinilai') : 'Menunggu'}</span>
+                  <span className={`pill ${pillCls}`}>{badgePill}</span>
                 </li>
               );
             })}
@@ -433,21 +485,6 @@ const waktuProses = (value) => {
   if (!value) return '–';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('id-ID');
-};
-
-/* Keyakinan bisa berupa "98.5%", 0.985, atau 98.5 -> jadikan angka persen */
-const keyakinan = (value) => {
-  if (value == null || value === '') return null;
-  const n = parseFloat(String(value).replace('%', '').replace(',', '.'));
-  if (Number.isNaN(n)) return null;
-  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
-};
-
-/* "bercak_daun" -> "Bercak daun" */
-const namaHasil = (s) => {
-  if (s == null || s === '') return '–';
-  const t = String(s).replace(/_/g, ' ').trim();
-  return t.charAt(0).toUpperCase() + t.slice(1);
 };
 
 /* Keyakinan dari model bisa berupa kata ("yakin") atau angka (98.5 / "98.5%" / 0.985) */
@@ -469,20 +506,9 @@ const infoKeyakinan = (record) => {
   return { pct: null, teks, singkat, cls: 'lv-none', note: 'Tingkat keyakinan dari model' };
 };
 
-const daunSehat = (prediction) => /sehat|healthy|normal/i.test(prediction || '');
-
 const gambarRecord = (record) => {
   const im = record.processed_images || {};
   return im.preprocess || im.segmentation || im.reconstruction || null;
-};
-
-const fotoKey = (value) => {
-  if (!value) return '';
-  let path = String(value).trim().split(/[?#]/, 1)[0].replace(/\\/g, '/');
-  const storagePath = path.match(/\/storage\/v1\/object\/(?:public|sign)\/[^/]+\/(.+)$/);
-  path = (storagePath?.[1] || path).replace(/^\/+/, '');
-  try { return decodeURIComponent(path); }
-  catch { return path; }
 };
 
 /* Satu kotak besar per bagian, header-nya seragam */
